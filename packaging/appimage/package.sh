@@ -42,6 +42,9 @@ export APPIMAGE_EXTRACT_AND_RUN=1
 export ARCH=x86_64
 export VERSION="${VERSION:-$(git -C "$root" rev-parse --short HEAD)}"
 export OUTPUT="$output_dir/KytyPS5-${VERSION}-x86_64.AppImage"
+# Repackaged Qt libraries must resolve against the existing AppDir, even
+# when the runner has no matching system Qt installation.
+LD_LIBRARY_PATH="$appdir/usr/lib:$appdir/usr/bin/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
 "$deploy" --appdir "$appdir" \
     --executable "$appdir/usr/bin/kyty_launcher" \
     --executable "$appdir/usr/bin/kyty_emulator" \
