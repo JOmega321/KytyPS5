@@ -51,7 +51,8 @@ jobs:
             libxi-dev libxrandr-dev libxss-dev libxtst-dev libxkbcommon-dev \
             libasound2-dev libpulse-dev libudev-dev libdbus-1-dev \
             libwayland-dev wayland-protocols libvulkan1 \
-            desktop-file-utils curl file patchelf xvfb xauth
+            desktop-file-utils curl file patchelf xvfb xauth \
+            libxcb-cursor0 libxkbcommon-x11-0
 
       - name: Install Qt
         if: steps.reuse.outputs.run_id == ''
