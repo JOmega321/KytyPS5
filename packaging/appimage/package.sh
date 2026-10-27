@@ -51,7 +51,26 @@ LD_LIBRARY_PATH="$appdir/usr/lib:$appdir/usr/bin/lib${LD_LIBRARY_PATH:+:$LD_LIBR
     --executable "$appdir/usr/bin/kyty_updater" \
     "${libraries[@]}" \
     --desktop-file "$appdir/kytyps5.desktop" \
-    --icon-file "$appdir/kytyps5.svg" --output appimage
+    --icon-file "$appdir/kytyps5.svg"
+
+# linuxdeploy copies --library inputs into usr/lib, but the Qt plugins
+# remain in their original CMake location. Point those originals at the
+# deployed libraries so no global Qt/LD_LIBRARY_PATH override is needed.
+while IFS= read -r -d '' plugin; do
+    relative_libdir="$(realpath --relative-to="$(dirname -- "$plugin")" "$appdir/usr/lib")"
+    patchelf --set-rpath "\$ORIGIN/$relative_libdir" "$plugin"
+    dependencies="$(ldd "$plugin")"
+    if [[ "$dependencies" == *'not found'* ]]; then
+        printf 'Unresolved Qt plugin dependencies for %s:\n%s\n' "$plugin" "$dependencies" >&2
+        exit 1
+    fi
+done < <(find "$appdir/usr/bin/plugins" -type f -name '*.so*' -print0)
+
+# The Qt libraries now live in usr/lib. Keep the original relative layout
+# available to Qt without retaining a second, unpatched copy of each library.
+rm -rf -- "$appdir/usr/bin/lib"
+ln -s ../lib "$appdir/usr/bin/lib"
+"$deploy" --appdir "$appdir" --output appimage
 test -s "$OUTPUT"
 chmod +x "$OUTPUT"
 cd -- "$output_dir"

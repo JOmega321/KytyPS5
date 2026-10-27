@@ -118,7 +118,7 @@ jobs:
           export XDG_DATA_HOME="$RUNNER_TEMP/kyty-appimage-data"
           "$image" --emulator --help
           set +e
-          timeout --signal=TERM 15s xvfb-run -a "$image" --local > launcher.log 2>&1
+          QT_DEBUG_PLUGINS=1 timeout --signal=TERM 15s xvfb-run -a "$image" --local > launcher.log 2>&1
           result=$?
           set -e
           cat launcher.log
