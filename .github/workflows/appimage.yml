@@ -1,0 +1,99 @@
+name: Build AppImage
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [appimage]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: appimage-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  appimage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build and packaging dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes \
+            clang lld ninja-build cmake glslang-tools python3 pkg-config \
+            libgl1-mesa-dev libx11-dev libxcursor-dev libxext-dev libxfixes-dev \
+            libxi-dev libxrandr-dev libxss-dev libxtst-dev libxkbcommon-dev \
+            libasound2-dev libpulse-dev libudev-dev libdbus-1-dev \
+            libwayland-dev wayland-protocols libvulkan1 \
+            desktop-file-utils curl file patchelf xvfb xauth
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.10.3'
+          host: linux
+          target: desktop
+          arch: linux_gcc_64
+          cache: true
+
+      - name: Configure
+        run: |
+          cmake -S . -B _Build/appimage -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" \
+            -DKYTY_BUILD_ORIGIN=Fork \
+            -DKYTY_BUILD_REPOSITORY="$GITHUB_REPOSITORY" \
+            2>&1 | tee configure.log
+          for feature in SDL_ALSA SDL_PULSEAUDIO SDL_WAYLAND SDL_X11 SDL_LIBUDEV SDL_DBUS; do
+            grep -qE "^--   ${feature} +\\(Wanted: ON\\): ON" configure.log
+          done
+
+      - name: Build and install
+        run: |
+          cmake --build _Build/appimage --target launcher --parallel 2
+          cmake --install _Build/appimage --prefix "$PWD/_Build/appimage/install"
+
+      - name: Package
+        run: |
+          desktop-file-validate packaging/appimage/kytyps5.desktop
+          bash packaging/appimage/package.sh _Build/appimage/install
+
+      - name: Check packaged CLI and graphical startup
+        run: |
+          image="$(realpath _Build/appimage-output/*.AppImage)"
+          export APPIMAGE_EXTRACT_AND_RUN=1
+          export XDG_DATA_HOME="$RUNNER_TEMP/kyty-appimage-data"
+          "$image" --emulator --help
+          set +e
+          timeout --signal=TERM 15s xvfb-run -a "$image" --local > launcher.log 2>&1
+          result=$?
+          set -e
+          cat launcher.log
+          test "$result" -eq 124
+          test -d "$XDG_DATA_HOME/KytyPS5"
+          if grep -Ei 'could not load the Qt platform plugin|error while loading shared libraries|symbol lookup error|Aborted|Segmentation fault' launcher.log; then
+            exit 1
+          fi
+
+      - name: Upload AppImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: KytyPS5-AppImage-x86_64
+          path: _Build/appimage-output/*
+          if-no-files-found: error
+
+      - name: Upload diagnostic logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: KytyPS5-AppImage-logs
+          path: |
+            configure.log
+            launcher.log
+          if-no-files-found: ignore

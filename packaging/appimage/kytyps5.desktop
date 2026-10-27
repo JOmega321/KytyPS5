@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=KytyPS5
+Comment=PlayStation 5 translation layer
+Exec=kyty_launcher
+Icon=kytyps5
+Categories=Game;Emulator;
+Terminal=false

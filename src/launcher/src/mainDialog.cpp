@@ -8,6 +8,7 @@
 #include "gameContent.h"
 #include "titleSound.h"
 #include "updateChecker.h"
+#include "runtimeDirectory.h"
 
 #include <QApplication>
 #include <QByteArray>
@@ -193,7 +194,8 @@ void MainDialogPrivate::FindInterpreter() {
 	}
 
 	bool found = QFile::exists(m_interpreter);
-	m_ui->widget->SetRuntimeDirectory(QFileInfo(m_interpreter).absolutePath());
+	m_ui->widget->SetRuntimeDirectory(
+	    LauncherPaths::RuntimeDirectory(QFileInfo(m_interpreter).absolutePath()));
 
 	if (found) {
 		m_ui->label_Interpreter->setText(tr("Emulator: ") + m_interpreter);
@@ -433,7 +435,8 @@ void MainDialog::RunInterpreter(QProcess* process, const Configuration& info, bo
 	process->setNativeArguments(
 	    CmdCommand(QDir::toNativeSeparators(interpreter), args, close_terminal));
 #endif
-	process->setWorkingDirectory(QFileInfo(interpreter).absolutePath());
+	process->setWorkingDirectory(
+	    LauncherPaths::RuntimeDirectory(QFileInfo(interpreter).absolutePath()));
 #if defined(_WIN32)
 	process->setCreateProcessArgumentsModifier([](QProcess::CreateProcessArguments* args) {
 		args->flags |= static_cast<uint32_t>(CREATE_NEW_CONSOLE);

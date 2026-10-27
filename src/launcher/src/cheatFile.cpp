@@ -1,4 +1,5 @@
 #include "cheatFile.h"
+#include "runtimeDirectory.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -48,7 +49,7 @@ QString PlanPath(const QString& title_id) {
 	if (!IsSupportedTitleId(title_id)) {
 		return {};
 	}
-	return QDir(QCoreApplication::applicationDirPath())
+	return QDir(LauncherPaths::RuntimeDirectory())
 	    .filePath(QStringLiteral("_Patches/%1.json").arg(title_id.trimmed().toUpper()));
 }
 

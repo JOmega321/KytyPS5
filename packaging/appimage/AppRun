@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+appdir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+export KYTY_APPIMAGE_DATA_DIR="${KYTY_APPIMAGE_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/KytyPS5}"
+mkdir -p -- "$KYTY_APPIMAGE_DATA_DIR"
+export KYTY_APPIMAGE_DATA_DIR="$(cd -- "$KYTY_APPIMAGE_DATA_DIR" && pwd)"
+export LD_LIBRARY_PATH="$appdir/usr/bin/lib:$appdir/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export QT_PLUGIN_PATH="$appdir/usr/bin/plugins"
+cd -- "$KYTY_APPIMAGE_DATA_DIR"
+
+if [[ "${1:-}" == "--emulator" ]]; then
+    shift
+    exec "$appdir/usr/bin/kyty_emulator" "$@"
+fi
+exec "$appdir/usr/bin/kyty_launcher" "$@"
