@@ -3,8 +3,14 @@
 This fork's **Build AppImage** GitHub Actions workflow builds native Linux
 x86-64 binaries, bundles their runtime dependencies, and uploads an AppImage
 plus its SHA-256 checksum as the `KytyPS5-AppImage-x86_64` artifact. It runs on
-pushes to `appimage` and can be started manually for that branch under Actions.
+pushes to `appimage`.
 The original Windows/macOS/Linux workflow is unchanged.
+
+When only packaging or CI files have changed, the workflow can reuse a
+previous successful build's binaries. It requires an exact match for every
+file outside `packaging/` and `.github/`, verifies the previous artifact's
+SHA-256 checksum, then repackages and repeats the startup checks. Source or
+dependency changes trigger a complete build.
 
 Download and extract the artifact ZIP, mark the `.AppImage` executable in your
 file manager, and launch it. A current Vulkan 1.3 driver is required from the

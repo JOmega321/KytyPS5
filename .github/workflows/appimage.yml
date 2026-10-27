@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: appimage-${{ github.ref }}
@@ -20,6 +21,26 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+          fetch-depth: 0
+
+      - name: Find reusable binaries for packaging-only changes
+        id: reuse
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/workflows/appimage.yml/runs?branch=appimage&status=success&per_page=10" > previous-runs.json
+          while read -r run_id base_sha; do
+            [[ "$run_id" =~ ^[0-9]+$ && "$base_sha" =~ ^[0-9a-f]{40}$ ]]
+            # Every source/dependency file must match; only packaging and CI may differ.
+            if git diff --quiet "$base_sha" HEAD -- . ':!packaging/**' ':!.github/**'; then
+              artifact_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts" \
+                --jq '.artifacts[] | select(.name == "KytyPS5-AppImage-x86_64" and .expired == false) | .id')"
+              if test -n "$artifact_id"; then
+                echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+                break
+              fi
+            fi
+          done < <(jq -r '.workflow_runs[] | [.id, .head_sha] | @tsv' previous-runs.json)
 
       - name: Install build and packaging dependencies
         run: |
@@ -33,6 +54,7 @@ jobs:
             desktop-file-utils curl file patchelf xvfb xauth
 
       - name: Install Qt
+        if: steps.reuse.outputs.run_id == ''
         uses: jurplel/install-qt-action@v4
         with:
           version: '6.10.3'
@@ -42,6 +64,7 @@ jobs:
           cache: true
 
       - name: Configure
+        if: steps.reuse.outputs.run_id == ''
         run: |
           cmake -S . -B _Build/appimage -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
@@ -55,14 +78,37 @@ jobs:
           done
 
       - name: Build and install
+        if: steps.reuse.outputs.run_id == ''
         run: |
-          cmake --build _Build/appimage --target launcher --parallel 2
+          cmake --build _Build/appimage --target launcher --parallel "$(nproc)"
           cmake --install _Build/appimage --prefix "$PWD/_Build/appimage/install"
+
+      - name: Download matching previous AppImage
+        if: steps.reuse.outputs.run_id != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: KytyPS5-AppImage-x86_64
+          path: _Build/prebuilt
+          run-id: ${{ steps.reuse.outputs.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Verify and extract previous AppImage
+        if: steps.reuse.outputs.run_id != ''
+        run: |
+          (cd _Build/prebuilt && sha256sum --check ./*.sha256)
+          image="$(realpath _Build/prebuilt/*.AppImage)"
+          chmod +x "$image"
+          mkdir -p _Build/repack
+          (cd _Build/repack && "$image" --appimage-extract)
 
       - name: Package
         run: |
           desktop-file-validate packaging/appimage/kytyps5.desktop
-          bash packaging/appimage/package.sh _Build/appimage/install
+          if test -d _Build/repack/squashfs-root; then
+            bash packaging/appimage/package.sh _Build/repack/squashfs-root _Build/appimage-output repack
+          else
+            bash packaging/appimage/package.sh _Build/appimage/install
+          fi
 
       - name: Check packaged CLI and graphical startup
         run: |

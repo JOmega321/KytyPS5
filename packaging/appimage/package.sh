@@ -2,7 +2,7 @@
 set -euo pipefail
 
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
-install_dir="$(realpath -- "${1:?Usage: package.sh INSTALL_DIR [OUTPUT_DIR]}")"
+install_dir="$(realpath -- "${1:?Usage: package.sh INSTALL_DIR [OUTPUT_DIR] [install|repack]}")"
 output_dir="${2:-$root/_Build/appimage-output}"
 mkdir -p -- "$output_dir"
 output_dir="$(realpath -- "$output_dir")"
@@ -10,7 +10,11 @@ work="$(mktemp -d)"
 trap 'rm -rf -- "$work"' EXIT
 appdir="$work/KytyPS5.AppDir"
 mkdir -p "$appdir/usr/bin" "$appdir/usr/share/licenses/kytyps5"
-cp -a "$install_dir/." "$appdir/usr/bin/"
+case "${3:-install}" in
+    install) cp -a "$install_dir/." "$appdir/usr/bin/" ;;
+    repack) cp -a "$install_dir/." "$appdir/" ;;
+    *) echo 'Expected install or repack mode' >&2; exit 2 ;;
+esac
 test -x "$appdir/usr/bin/kyty_launcher"
 test -x "$appdir/usr/bin/kyty_emulator"
 test -f "$appdir/usr/bin/qt.conf"
