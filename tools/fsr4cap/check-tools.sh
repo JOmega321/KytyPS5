@@ -3,7 +3,7 @@ set -euo pipefail
 here=$(cd -- "$(dirname -- "$0")" && pwd)
 bin=$here/prebuilt/bin
 [[ -f $bin/fsr4cap.exe ]] || { echo 'Bundled capture executable missing' >&2; exit 4; }
-"$bin/python3" - <<'PY'
+"$bin/kyty-python3" - <<'PY'
 import hashlib, json, math, os, re, struct, subprocess, sys, ssl, ctypes
 from pathlib import Path
 exe = Path(sys.prefix).parent / 'bin/fsr4cap.exe'
@@ -17,7 +17,7 @@ PY
 "$bin/flock" --version
 work=$(mktemp -d)
 trap 'rm -rf -- "$work"' EXIT
-"$bin/python3" - "$work/input.spvasm" <<'PY'
+"$bin/kyty-python3" - "$work/input.spvasm" <<'PY'
 import sys
 from pathlib import Path
 Path(sys.argv[1]).write_text('''OpCapability Shader

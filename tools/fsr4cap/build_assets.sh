@@ -42,7 +42,7 @@ if [[ -x $here/prebuilt/bin/dxil-spirv ]]; then
     tools=$here/prebuilt/bin
     export BB_FSR4CAP_TOOLS="$tools"
     export PATH="$tools:$PATH"
-    python=$tools/python3
+    python=$tools/kyty-python3
     echo "[FSR411] Using bundled capture, Python and SPIR-V tools"
 fi
 

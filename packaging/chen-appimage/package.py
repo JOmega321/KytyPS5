@@ -44,7 +44,7 @@ shutil.copy2(pathlib.Path(sys.executable).resolve(), python_home / 'bin' / pytho
 stdlib = pathlib.Path('/usr/lib') / python_version
 shutil.copytree(stdlib, python_home / 'lib' / python_version,
                 ignore=shutil.ignore_patterns('__pycache__', 'test', 'tests', 'idlelib', 'tkinter', 'ensurepip', 'sitecustomize.py'))
-wrapper = capture / 'bin/python3'
+wrapper = capture / 'bin/kyty-python3'
 wrapper.write_text('#!/usr/bin/env bash\nset -euo pipefail\n'
     'here="$(cd -- "$(dirname -- "$0")" && pwd)"\n'
     'unset PYTHONPATH PYTHONSTARTUP\nexport PYTHONHOME="$here/../python"\n'
