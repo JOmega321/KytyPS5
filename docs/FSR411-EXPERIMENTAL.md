@@ -113,8 +113,8 @@ capture counts and live stdout/stderr. It keeps a full build log, provides Cance
 and checks that all four INT8 sets contain their 29 SPIR-V modules and weights.
 This checks file completeness, not GPU rendering or compatibility.
 
-The builder still requires Python, SPIR-V tools, MinGW GCC, CMake, Ninja, GCC,
-Git, flock, and Steam with a compatible Proton; its output reports missing tools
+Source-tree builds require Python, SPIR-V tools, MinGW GCC, CMake, Ninja, GCC,
+Git, flock, and Steam with a compatible Proton. The AppImage bundles the preparation tools; its output reports missing tools
 and unsupported DLLs. Tools may be obtained through Nix if installed. The translator
 is downloaded from its pinned source and built locally. DLLs and model assets are
 not distributed. Closing the launcher cancels the owned builder process group.
@@ -135,3 +135,10 @@ Your own AMD DLL, Steam/compatible Proton, and host Vulkan driver remain require
 performs a SPIR-V assembly/disassembly round trip without needing the GPU.
 This is separate from testing DLL capture on a real GPU. The translator's pinned
 corresponding source and notices are included under the capture tool directory.
+
+Packaging-only updates can reuse the complete, checksummed AppDir from the successful
+`fd5443c1` build. CI checks every changed path and the native build recipe before
+reuse; a native source/submodule change or unavailable input triggers a fresh build.
+`native-reuse.json` records the original compiled source separately from the new
+packaging revision. Existing runtime libraries are retained, and all final-image
+startup and bundled-tool checks run again. No failed package is used as an input.

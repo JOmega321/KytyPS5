@@ -1320,7 +1320,7 @@ void LauncherWindow::FsrSetupPage() {
         }
         if (FlatButton("Choose DLL...")) PickFolder(false, false, true);
         ImGui::EndDisabled();
-    }, "The DLL is checked before capture. Capture and translation tools are bundled in the AppImage. Proton or DLL errors appear in the build output.");
+    }, "The DLL is checked before capture. Missing host tools, Proton, or an incompatible DLL are explained in the build output.");
     Row("fsrsetup.build", [&] {
         if (FlatButton("Build FSR4 INT8 assets", !status.running && !Trim(fsr_dll_).empty())) StartFsrAssets();
         ImGui::SameLine();

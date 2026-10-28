@@ -12,25 +12,29 @@ root = pathlib.Path(__file__).resolve().parents[2]
 build = pathlib.Path(sys.argv[1]).resolve()
 appdir = pathlib.Path(sys.argv[2]).resolve()
 payload = appdir / 'usr/payload'
-payload.mkdir(parents=True)
-subprocess.run(['cmake', '-DCMAKE_INSTALL_PREFIX=' + str(payload),
-                '-DCMAKE_INSTALL_LOCAL_ONLY=1', '-P', str(build / 'cmake_install.cmake')], check=True)
-for name in ('kyty_launcher', 'kyty_shader_precompile'):
-    shutil.copy2(build / name, payload / name)
+reusing = os.environ.get('KYTY_REUSE_NATIVE') == '1'
+if not reusing:
+    payload.mkdir(parents=True)
+    subprocess.run(['cmake', '-DCMAKE_INSTALL_PREFIX=' + str(payload),
+                    '-DCMAKE_INSTALL_LOCAL_ONLY=1', '-P', str(build / 'cmake_install.cmake')], check=True)
+    for name in ('kyty_launcher', 'kyty_shader_precompile'):
+        shutil.copy2(build / name, payload / name)
+else:
+    assert (payload / 'native-reuse.json').is_file()
 for source, target in [('tools/local/run_ds.sh', 'run_ds.sh'), ('precompile-linux.sh', 'precompile-linux.sh'),
                        ('tools/local/dlss-bridge/get-dlss-linux.sh', 'get-dlss-linux.sh')]:
     shutil.copy2(root / source, payload / target)
     (payload / target).chmod(0o755)
 bridge = payload / 'dlss-bridge'
-bridge.mkdir()
+bridge.mkdir(exist_ok=True)
 for source in ('tools/local/dlss-bridge/kyty_dlss_bridge.cpp', 'tools/local/dlss-bridge/LICENSE.txt', 'src/local/kyty-dlss-bridge.h'):
     shutil.copy2(root / source, bridge)
 static = payload / 'tools/local/static-precompile'
-static.mkdir(parents=True)
+static.mkdir(parents=True, exist_ok=True)
 for source in (root / 'tools/local/static-precompile').glob('*'):
     if source.name == 'pass-states.json' or source.suffix == '.hints':
         shutil.copy2(source, static)
-shutil.copytree(root / 'tools/fsr4cap', payload / 'tools/fsr4cap')
+shutil.copytree(root / 'tools/fsr4cap', payload / 'tools/fsr4cap', dirs_exist_ok=True)
 # Prebuilt preparation tools, isolated from the emulator and the host's Python environment.
 capture_build = root / '_Build/fsr-capture-tools'
 capture = payload / 'tools/fsr4cap/prebuilt'
@@ -43,7 +47,7 @@ python_home = capture / 'python'
 shutil.copy2(pathlib.Path(sys.executable).resolve(), python_home / 'bin' / python_version)
 stdlib = pathlib.Path('/usr/lib') / python_version
 shutil.copytree(stdlib, python_home / 'lib' / python_version,
-                ignore=shutil.ignore_patterns('__pycache__', 'test', 'tests', 'idlelib', 'tkinter', 'ensurepip', 'sitecustomize.py'))
+                ignore=shutil.ignore_patterns('__pycache__', 'test', 'tests', 'idlelib', 'tkinter', 'ensurepip', 'sitecustomize.py', 'config-*', '*.a', '*.o'))
 wrapper = capture / 'bin/kyty-python3'
 wrapper.write_text('#!/usr/bin/env bash\nset -euo pipefail\n'
     'here="$(cd -- "$(dirname -- "$0")" && pwd)"\n'
@@ -71,18 +75,22 @@ for base in (root / '3rdparty', build / '_deps'):
             shutil.copy2(source, target)
 version = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
 (payload / 'version').write_text(version + '\n')
-(payload / 'build-manifest.txt').write_text(
-    subprocess.check_output(['git', 'submodule', 'status', '--recursive'], cwd=root, text=True)
-    + '\n' + (build / 'CMakeCache.txt').read_text())
-with (payload / 'build-manifest.txt').open('a') as manifest:
-    manifest.write('\nEmbedded native version metadata:\n' + (build / 'kytyGitVersion.h').read_text())
-    for command in (['clang', '--version'], ['cmake', '--version'], ['ldd', '--version']):
-        manifest.write('\n' + subprocess.check_output(command, text=True))
-    for dependency in sorted((build / '_deps').glob('*-src')):
-        revision = subprocess.check_output(['git', '-C', str(dependency), 'rev-parse', 'HEAD'], text=True)
-        manifest.write(dependency.name + ': ' + revision)
-    for archive in sorted((build / 'externals').glob('*.zip')):
-        manifest.write(archive.name + ': sha256 ' + hashlib.sha256(archive.read_bytes()).hexdigest() + '\n')
+if reusing:
+    with (payload / 'build-manifest.txt').open('a') as manifest:
+        manifest.write('\nPackaging revision (native compiled source retained): ' + version + '\n')
+else:
+    (payload / 'build-manifest.txt').write_text(
+        subprocess.check_output(['git', 'submodule', 'status', '--recursive'], cwd=root, text=True)
+        + '\n' + (build / 'CMakeCache.txt').read_text())
+    with (payload / 'build-manifest.txt').open('a') as manifest:
+        manifest.write('\nEmbedded native version metadata:\n' + (build / 'kytyGitVersion.h').read_text())
+        for command in (['clang', '--version'], ['cmake', '--version'], ['ldd', '--version']):
+            manifest.write('\n' + subprocess.check_output(command, text=True))
+        for dependency in sorted((build / '_deps').glob('*-src')):
+            revision = subprocess.check_output(['git', '-C', str(dependency), 'rev-parse', 'HEAD'], text=True)
+            manifest.write(dependency.name + ': ' + revision)
+        for archive in sorted((build / 'externals').glob('*.zip')):
+            manifest.write(archive.name + ': sha256 ' + hashlib.sha256(archive.read_bytes()).hexdigest() + '\n')
 libdir = payload / 'lib'
 libdir.mkdir(exist_ok=True)
 host = re.compile(r'^(ld-linux|lib(c|m|pthread|dl|rt|resolv|util)\.so|lib(GL|EGL|GLX|GLdispatch|OpenGL|vulkan|drm|gbm))')
@@ -105,7 +113,8 @@ while pending:
             continue
         seen.add(name)
         target = libdir / name
-        shutil.copy2(source, target)
+        if pathlib.Path(source).resolve() != target.resolve() and not (reusing and target.exists()):
+            shutil.copy2(source, target)
         for candidate in (source, os.path.realpath(source)):
             owner = subprocess.run(['dpkg-query', '-S', candidate], text=True, capture_output=True)
             if owner.returncode == 0:

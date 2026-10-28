@@ -5,6 +5,7 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+  actions: read
 jobs:
   appimage:
     runs-on: ubuntu-24.04
@@ -24,7 +25,12 @@ jobs:
           bash -n tools/fsr4cap/build_assets.sh packaging/chen-appimage/AppRun
       - name: Build bundled FSR4 capture tools
         run: packaging/chen-appimage/build-capture-tools.sh
+      - name: Reuse verified unchanged native payload
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /usr/bin/python3 packaging/chen-appimage/reuse-native.py
       - name: Configure and build native programs
+        if: env.KYTY_REUSE_NATIVE != '1'
         run: |
           cmake -S . -B _Build/appimage -G Ninja -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DKYTY_BUILD_LAUNCHER=OFF \
@@ -36,6 +42,7 @@ jobs:
           _Build/appimage/kyty_emulator --help > _Build/native-help.log
           _Build/appimage/kyty_launcher --help >> _Build/native-help.log
       - name: Preserve native build before packaging
+        if: env.KYTY_REUSE_NATIVE != '1'
         run: |
           git rev-parse HEAD > _Build/appimage/native-source.txt
           git submodule status --recursive > _Build/appimage/native-dependencies.txt
@@ -49,6 +56,7 @@ jobs:
           cd _Build
           sha256sum native-binaries.tar.gz > native-binaries.tar.gz.sha256
       - name: Upload native build
+        if: env.KYTY_REUSE_NATIVE != '1'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: chenxiao07-native-x86_64
