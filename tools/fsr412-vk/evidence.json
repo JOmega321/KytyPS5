@@ -1,0 +1,199 @@
+{
+  "format_version": 1,
+  "dll_sha256": "4a7e895af6e0b615d40a84d59eb8c2b1054ad91cdd0c739567940270d51bdab7",
+  "dll_version": [
+    4,
+    1,
+    2,
+    4555
+  ],
+  "unique_modules": 1002,
+  "embedded_occurrences": 1389,
+  "rejected_candidates": 0,
+  "runtime_ready": false,
+  "weights_recovered": false,
+  "windows_imports": [
+    {
+      "dll": "vulkan-1.dll",
+      "functions": [
+        "vkGetBufferMemoryRequirements",
+        "vkGetPhysicalDeviceProperties2",
+        "vkCreateImage",
+        "vkDestroyImage",
+        "vkEnumerateDeviceExtensionProperties",
+        "vkGetPhysicalDeviceProperties",
+        "vkAllocateMemory",
+        "vkDestroyBuffer",
+        "vkGetDeviceProcAddr",
+        "vkCreateBuffer",
+        "vkGetPhysicalDeviceFeatures2",
+        "vkGetPhysicalDeviceMemoryProperties",
+        "vkGetImageMemoryRequirements"
+      ]
+    },
+    {
+      "dll": "MSVCP140.dll",
+      "functions": [
+        "?_Decref@facet@locale@std@@UEAAPEAV_Facet_base@3@XZ",
+        "?_Incref@facet@locale@std@@UEAAXXZ",
+        "?_Gettrue@_Locinfo@std@@QEBAPEBDXZ",
+        "?_Getfalse@_Locinfo@std@@QEBAPEBDXZ",
+        "?_Getlconv@_Locinfo@std@@QEBAPEBUlconv@@XZ",
+        "??1_Locinfo@std@@QEAA@XZ",
+        "??0_Locinfo@std@@QEAA@PEBD@Z",
+        "_Mtx_unlock",
+        "??1facet@locale@std@@MEAA@XZ",
+        "??0facet@locale@std@@IEAA@_K@Z",
+        "?_Throw_Cpp_error@std@@YAXH@Z",
+        "?_Getcvt@_Locinfo@std@@QEBA?AU_Cvtvec@@XZ",
+        "?_Xlength_error@std@@YAXPEBD@Z",
+        "_Mbrtowc",
+        "??1_Lockit@std@@QEAA@XZ",
+        "??0_Lockit@std@@QEAA@H@Z",
+        "_Mtx_init_in_situ",
+        "?_Getgloballocale@locale@std@@CAPEAV_Locimp@12@XZ",
+        "?_Init@locale@std@@CAPEAV_Locimp@12@_N@Z",
+        "?_Xbad_alloc@std@@YAXXZ",
+        "?_Id_cnt@id@locale@std@@0HA",
+        "?id@?$numpunct@D@std@@2V0locale@2@A",
+        "?id@?$numpunct@_W@std@@2V0locale@2@A",
+        "_Mtx_lock"
+      ]
+    },
+    {
+      "dll": "VERSION.dll",
+      "functions": [
+        "GetFileVersionInfoA",
+        "GetFileVersionInfoSizeA",
+        "VerQueryValueA"
+      ]
+    },
+    {
+      "dll": "VCRUNTIME140.dll",
+      "functions": [
+        "_CxxThrowException",
+        "__std_type_info_destroy_list",
+        "memcpy",
+        "memcmp",
+        "__C_specific_handler",
+        "__std_exception_copy",
+        "__std_exception_destroy",
+        "memset",
+        "_purecall",
+        "memmove",
+        "__std_terminate"
+      ]
+    },
+    {
+      "dll": "VCRUNTIME140_1.dll",
+      "functions": [
+        "__CxxFrameHandler4"
+      ]
+    },
+    {
+      "dll": "api-ms-win-crt-heap-l1-1-0.dll",
+      "functions": [
+        "malloc",
+        "free",
+        "calloc",
+        "_callnewh"
+      ]
+    },
+    {
+      "dll": "api-ms-win-crt-stdio-l1-1-0.dll",
+      "functions": [
+        "__stdio_common_vswprintf_s",
+        "__stdio_common_vsprintf"
+      ]
+    },
+    {
+      "dll": "api-ms-win-crt-runtime-l1-1-0.dll",
+      "functions": [
+        "_initterm",
+        "_initterm_e",
+        "_seh_filter_dll",
+        "_configure_narrow_argv",
+        "_initialize_narrow_environment",
+        "_initialize_onexit_table",
+        "_register_onexit_function",
+        "_invoke_watson",
+        "_execute_onexit_table",
+        "_crt_atexit",
+        "_cexit"
+      ]
+    },
+    {
+      "dll": "api-ms-win-crt-string-l1-1-0.dll",
+      "functions": [
+        "wcscpy_s",
+        "strcmp",
+        "strncpy_s"
+      ]
+    },
+    {
+      "dll": "api-ms-win-crt-math-l1-1-0.dll",
+      "functions": [
+        "log2",
+        "floorf",
+        "floor",
+        "cosf",
+        "powf",
+        "_ldclass",
+        "_fdclass",
+        "_dclass",
+        "sinf",
+        "roundf",
+        "log2f",
+        "_fdsign",
+        "exp2f",
+        "_dsign",
+        "atanf",
+        "_ldsign",
+        "tanf"
+      ]
+    },
+    {
+      "dll": "api-ms-win-crt-environment-l1-1-0.dll",
+      "functions": [
+        "getenv_s"
+      ]
+    },
+    {
+      "dll": "KERNEL32.dll",
+      "functions": [
+        "WakeAllConditionVariable",
+        "AcquireSRWLockExclusive",
+        "ReleaseSRWLockExclusive",
+        "IsProcessorFeaturePresent",
+        "TerminateProcess",
+        "GetCurrentProcess",
+        "SetUnhandledExceptionFilter",
+        "UnhandledExceptionFilter",
+        "RtlVirtualUnwind",
+        "RtlLookupFunctionEntry",
+        "RtlCaptureContext",
+        "GetTickCount64",
+        "QueryPerformanceCounter",
+        "GetCurrentThreadId",
+        "GetSystemTimeAsFileTime",
+        "SleepConditionVariableSRW",
+        "MultiByteToWideChar",
+        "DisableThreadLibraryCalls",
+        "WideCharToMultiByte",
+        "InitializeSListHead",
+        "OutputDebugStringW",
+        "GetModuleHandleA",
+        "LoadLibraryA",
+        "GetProcAddress",
+        "FreeLibrary",
+        "OutputDebugStringA",
+        "DebugBreak",
+        "IsDebuggerPresent",
+        "GetModuleFileNameA",
+        "LoadLibraryExA",
+        "GetCurrentProcessId"
+      ]
+    }
+  ],
+  "status": "Shader extraction only; no dispatch graph, variant selection or upscaling runtime yet."
+}

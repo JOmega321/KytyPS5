@@ -1,0 +1,50 @@
+name: FSR 4.1.2 Linux conversion prototype
+on:
+  push:
+    branches: [chen-kytyps5-fsr412-linux]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  prototype:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Test native loader and bounded extractor
+        run: python3 tests/fsr412-vk-extract.py
+      - name: Convert official Vulkan DLL GPU programs
+        run: |
+          mkdir -p _Build/fsr412
+          curl -fL --retry 3 -o _Build/fsr412/upscaler.dll https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/v2.4.0/Kits/FidelityFX/signedbin/amd_fidelityfx_upscaler_vk.dll
+          echo '4a7e895af6e0b615d40a84d59eb8c2b1054ad91cdd0c739567940270d51bdab7  _Build/fsr412/upscaler.dll' | sha256sum -c
+          python3 tools/fsr412-vk/extract_vk.py _Build/fsr412/upscaler.dll _Build/fsr412/converted > _Build/fsr412/summary.json
+          bash tools/fsr412-vk/build-native.sh _Build/fsr412/native
+          _Build/fsr412/native/native-probe "$(realpath _Build/fsr412/native/libfsr412_spirv.so)" _Build/fsr412/converted/shaders.spvpack | tee _Build/fsr412/native-probe.log
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path('_Build/fsr412/summary.json').read_text())
+          assert report['dll_version'] == [4, 1, 2, 4555]
+          assert report['unique_modules'] == 1002
+          assert report['rejected_candidates'] == 0
+          assert report['runtime_ready'] is False
+          assert report['weights_recovered'] is False
+          PY
+      - name: Package generic native probe and conversion sources
+        run: |
+          mkdir -p _Build/fsr412/distribution
+          cp _Build/fsr412/native/* _Build/fsr412/distribution/
+          cp tools/fsr412-vk/{extract_vk.py,shader_pack.h,shader_pack.cpp,native_probe.cpp,build-native.sh,README.md} _Build/fsr412/distribution/
+          cp LICENSE _Build/fsr412/distribution/
+          cp _Build/fsr412/{summary.json,native-probe.log} _Build/fsr412/distribution/
+          git rev-parse HEAD > _Build/fsr412/distribution/SOURCE_COMMIT
+          cd _Build/fsr412/distribution
+          sha256sum libfsr412_spirv.so native-probe > SHA256SUMS
+      - name: Upload conversion prototype (no AMD binaries or shader data)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: fsr412-linux-shader-prototype-x86_64
+          path: _Build/fsr412/distribution/
+          if-no-files-found: error
+          retention-days: 30
