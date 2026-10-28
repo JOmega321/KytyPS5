@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 22074)
-Total output lines: 2106
-
 #include "ui.h"
 
 #include "strings.h"
@@ -718,7 +715,661 @@ void LauncherWindow::PlayPage() {
 	                              C(WindowColor, 0.38f));
 	draw->AddRectFilledMultiColor({at.x, at.y + h * 0.55f}, {at.x + width, at.y + h},
 	                              C(WindowColor, 0.38f), C(WindowColor, 0.38f),
-	                              C(WindowColor, 1.0f), C(WindowColor, 1.0f…7074 tokens truncated…Child("##fsrbuildlog", {0, 240.0f * scale_}, ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar);
+	                              C(WindowColor, 1.0f), C(WindowColor, 1.0f));
+	draw->AddRectFilledMultiColor(at, {at.x + width * 0.6f, at.y + h}, C(WindowColor, 0.7f),
+	                              C(WindowColor, 0.0f), C(WindowColor, 0.0f), C(WindowColor, 0.7f));
+	const std::string title =
+	    game_.Found() ? (game_.name.empty() ? game_.title_id : game_.name) : T("play.choose");
+	const std::string line = game_.Found() ? game_.title_id + "  ·  " + game_.version : "";
+	ImGui::PushFont(serif_, BannerSize);
+	const float title_h = ImGui::GetTextLineHeight();
+	ImGui::PopFont();
+	const float line_h = line.empty() ? 0.0f : ImGui::GetTextLineHeight() + 6.0f * scale_;
+	ImGui::SetCursorScreenPos(
+	    {at.x + 44.0f * scale_, at.y + h - 22.0f * scale_ - line_h - title_h});
+	ImGui::PushFont(serif_, BannerSize);
+	ImGui::PushStyleColor(ImGuiCol_Text, V(0xFFFFFF));
+	ImGui::TextUnformatted(title.c_str());
+	ImGui::PopStyleColor();
+	ImGui::PopFont();
+	if (!line.empty()) {
+		ImGui::SetCursorScreenPos(
+		    {at.x + 46.0f * scale_, ImGui::GetCursorScreenPos().y + 4.0f * scale_});
+		ImGui::PushStyleColor(ImGuiCol_Text, V(TextDimColor));
+		ImGui::TextUnformatted(line.c_str());
+		ImGui::PopStyleColor();
+	}
+	ImGui::SetCursorScreenPos({at.x, at.y + h});
+
+	// Checks on the left; the game and the current settings on the right.
+	const float margin = 44.0f * scale_;
+	const float gap    = 24.0f * scale_;
+	const float inner  = width - 2 * margin;
+	const float left_w = (inner - gap) * (1.0f / 2.05f);
+	ImGui::SetCursorPos({margin, ImGui::GetCursorPosY() + 22.0f * scale_});
+	ImGui::BeginGroup();
+	ImGui::BeginChild("##checks-column", {left_w, 0}, ImGuiChildFlags_AutoResizeY,
+	                  ImGuiWindowFlags_NoScrollbar);
+	Card("##checks", [&] {
+		ImGui::PushFont(nullptr, SectionSize);
+		ImGui::PushStyleColor(ImGuiCol_Text, V(GoldColor));
+		ImGui::TextUnformatted(T("play.checks"));
+		ImGui::PopStyleColor();
+		ImGui::PopFont();
+		ImGui::Dummy({0, 4.0f * scale_});
+		auto check = [&](Mark mark, const std::string& text) {
+			DrawMark(mark, 22.0f * scale_);
+			ImGui::SameLine(0, 0);
+			ImGui::PushTextWrapPos(0.0f);
+			ImGui::TextUnformatted(text.c_str());
+			ImGui::PopTextWrapPos();
+			ImGui::Dummy({0, 2.0f * scale_});
+		};
+		if (context_.emulator.empty()) check(Mark::Bad, T("emulator.missing"));
+		if (game_job_ != nullptr)
+			check(Mark::Busy, T("game.loading"));
+		else if (game_.Found())
+			check(Mark::Good, F("game.ok", {game_.name.empty() ? game_.title_id : game_.name,
+			                                game_.title_id, game_.version}));
+		else
+			check(Mark::Bad, T(Trim(game_text_).empty() ? "game.none" : "game.bad"));
+		if (context_.gpus.empty()) {
+			check(Mark::Warn, T("gpu.none"));
+		} else {
+			const auto& gpu = context_.gpus.front();
+			if (gpu.memory > 0)
+				check(
+				    Mark::Good,
+				    F("gpu.ok", {gpu.name, std::to_string(static_cast<int>(std::lround(
+				                               static_cast<double>(gpu.memory) / 1073741824.0)))}));
+			else
+				check(Mark::Good, F("gpu.okNoMemory", {gpu.name}));
+		}
+		const auto ram_gb =
+		    static_cast<int>(std::lround(static_cast<double>(context_.ram) / 1073741824.0));
+		check(ram_gb <= 20 ? Mark::Warn : Mark::Good,
+		      F(ram_gb <= 20 ? "ram.low" : "ram.ok", {std::to_string(ram_gb)}));
+		switch (store_) {
+			case StoreState::Checking: check(Mark::Busy, T("shaders.checking")); break;
+			case StoreState::Current: check(Mark::Good, T("shaders.current")); break;
+			case StoreState::Outdated: check(Mark::Warn, T("shaders.outdated")); break;
+			case StoreState::None: check(Mark::Warn, T("shaders.none")); break;
+			default:
+				if (game_.Found()) check(Mark::Busy, T("shaders.unknown"));
+				break;
+		}
+		if (dlss_available_)
+			check(Mark::Good, T("dlss.ok"));
+		else
+			check(Mark::Busy, T(context_.rtx ? "dlss.noLibrary" : "dlss.noRtx"));
+		if (S().Str("upscaler") == "fsr4")
+            check(Mark::Warn, "FSR 4.1.2 requested; assets and device support are checked when the game starts");
+        else
+            check(Mark::Good, T("fsr.ok"));
+	});
+	ImGui::EndChild();
+	ImGui::SameLine(0, gap);
+	ImGui::BeginChild("##game-column", {inner - left_w - gap, 0}, ImGuiChildFlags_AutoResizeY,
+	                  ImGuiWindowFlags_NoScrollbar);
+	Card("##game", [&] {
+		ImGui::PushFont(nullptr, SectionSize);
+		ImGui::PushStyleColor(ImGuiCol_Text, V(GoldColor));
+		ImGui::TextUnformatted(T("play.gamebox"));
+		ImGui::PopStyleColor();
+		ImGui::PopFont();
+		ImGui::Dummy({0, 4.0f * scale_});
+		ImGui::SetNextItemWidth(-1);
+		if (ImGui::InputText("##game-path", &game_text_)) {
+			game_edit_         = std::chrono::steady_clock::now();
+			game_edit_pending_ = true;
+		}
+		if (FlatButton(T("button.folder"))) PickFolder(false);
+		ImGui::SameLine();
+		if (FlatButton(T("button.zar"))) PickFolder(true);
+	});
+	ImGui::Dummy({0, 10.0f * scale_});
+	Card("##summary", [&] {
+		ImGui::PushFont(nullptr, SectionSize);
+		ImGui::PushStyleColor(ImGuiCol_Text, V(GoldColor));
+		ImGui::TextUnformatted(T("play.summary"));
+		ImGui::PopStyleColor();
+		ImGui::PopFont();
+		ImGui::Dummy({0, 2.0f * scale_});
+		std::vector<std::pair<std::string, std::string>> lines;
+		(void)Summary(&lines);
+		if (ImGui::BeginTable("##summary-table", 2, ImGuiTableFlags_None)) {
+			ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthFixed);
+			ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch);
+			for (const auto& [label, value]: lines) {
+				ImGui::TableNextRow();
+				ImGui::TableSetColumnIndex(0);
+				ImGui::PushStyleColor(ImGuiCol_Text, V(TextDimColor));
+				ImGui::TextUnformatted(label.c_str());
+				ImGui::PopStyleColor();
+				ImGui::TableSetColumnIndex(1);
+				ImGui::PushTextWrapPos(0.0f);
+				ImGui::TextUnformatted(value.c_str());
+				ImGui::PopTextWrapPos();
+			}
+			ImGui::EndTable();
+		}
+	});
+	ImGui::EndChild();
+	ImGui::EndGroup();
+	ImGui::Dummy({0, 30.0f * scale_});
+}
+
+// ------------------------------------------------------------ Display
+
+void LauncherWindow::DisplayPage() {
+	PageTitle("display.title");
+	Section("display.window");
+	const std::vector<std::string> ratios {"16:9", "21:9", "32:9"};
+	const auto                     ratio = S().Str("ratio");
+	// The ratio's resolutions; the one saved, else the one nearest its height (saved).
+	const auto& list = Resolutions(ratio);
+	int         current =
+	    static_cast<int>(std::find(list.begin(), list.end(), S().Str("resolution")) - list.begin());
+	if (current >= static_cast<int>(list.size())) {
+		const int height =
+		    HeightOf(S().Str("resolution")) > 0 ? HeightOf(S().Str("resolution")) : 1440;
+		int best = 1 << 30;
+		for (int i = 0; i < static_cast<int>(list.size()); ++i) {
+			const int distance = std::abs(HeightOf(list[static_cast<size_t>(i)]) - height);
+			if (distance < best) {
+				best    = distance;
+				current = i;
+			}
+		}
+		S().Set("resolution", list[static_cast<size_t>(current)]);
+	}
+	Row(
+	    "resolution",
+	    [&] {
+		    std::vector<std::string> labels;
+		    for (const auto& r: list)
+			    labels.push_back(Times(r));
+		    if (Combo("##resolution", &current, labels, 300)) {
+			    S().Set("resolution", list[static_cast<size_t>(current)]);
+			    Changed();
+		    }
+	    },
+	    T("resolution.desc"));
+	Row(
+	    "ratio",
+	    [&] {
+		    int index =
+		        static_cast<int>(std::find(ratios.begin(), ratios.end(), ratio) - ratios.begin());
+		    if (Combo("##ratio", &index, {T("ratio.169"), "21:9", "32:9"}, 300)) {
+			    S().Set("ratio", ratios[static_cast<size_t>(std::clamp(index, 0, 2))]);
+			    Changed();
+		    }
+	    },
+	    T("ratio.desc"));
+	Row("fullscreen", [&] { SettingSwitch("##fullscreen", "fullscreen"); });
+	Row(
+	    "aspect", [&] { SettingSwitch("##aspect", "aspect", S().Bool("fullscreen")); },
+	    T("aspect.desc"));
+	Row("hdr", [&] { SettingSwitch("##hdr", "hdr"); }, T("hdr.desc"));
+	Section("display.rate");
+	Row("fps120", [&] { SettingSwitch("##fps120", "fps120"); }, T("fps120.desc"));
+	Row("vsync", [&] { SettingSwitch("##vsync", "vsync"); }, T("vsync.desc"));
+	Row("lowlatency", [&] { SettingSwitch("##lowlatency", "lowlatency"); }, T("lowlatency.desc"));
+}
+
+// ------------------------------------------------------------ Graphics
+
+bool LauncherWindow::RenderForUpscaler() const {
+	return commands_.Dlss() || commands_.FsrUpscaler();
+}
+
+bool LauncherWindow::HdOutputChosen() const {
+	return commands_.HdOutput();
+}
+
+// The output's lines: 1080 (the 1080p output), 1440 (1440p with an upscaler) or 2160.
+int LauncherWindow::OutputLines() const {
+	if (HdOutputChosen()) return 1080;
+	return commands_.Output1440() ? 1440 : 2160;
+}
+
+double LauncherWindow::RatioAspect() const {
+	const auto ratio = S().Str("ratio");
+	return ratio == "21:9" ? 64.0 / 27.0 : ratio == "32:9" ? 32.0 / 9.0 : 16.0 / 9.0;
+}
+
+// The highest render height whose 3D at the ratio fits the game's render target memory, made for
+// 3840x2160: no more of the GPU's 64 KiB tiles than 3840x2160 (the emulator's FitsRenderTargets).
+int LauncherWindow::MaxRenderHeight() const {
+	const double aspect = RatioAspect();
+	const int    tiles[4][2] {{256, 128}, {128, 128}, {128, 64}, {64, 64}};
+	for (int h = 2160; h >= 720; h -= 8) {
+		const double w    = std::floor(h * aspect / 8.0 + 0.5) * 8;
+		bool         fits = true;
+		for (const auto& tile: tiles) {
+			if (std::ceil(w / tile[0]) * std::ceil(static_cast<double>(h) / tile[1]) >
+			    std::ceil(3840.0 / tile[0]) * std::ceil(2160.0 / tile[1]))
+				fits = false;
+		}
+		if (fits) return h;
+	}
+	return 720;
+}
+
+// The heights the ratio allows (with DLSS or FSR 3 those its output takes: 1080 and up or 720 for
+// 4K, up to 1080 for 1080p; below 720 with the 1080p output only).
+std::vector<int> LauncherWindow::AllowedRenderHeights() const {
+	const int        most  = MaxRenderHeight();
+	const bool       sr    = RenderForUpscaler();
+	const int        lines = OutputLines();
+	const bool       hd    = lines == 1080;
+	std::vector<int> allowed;
+	if (lines == 1440) {
+		for (const int h: Output1440Heights)
+			if (h <= most) allowed.push_back(h);
+		return allowed;
+	}
+	for (const int h: RenderHeights)
+		if (h <= most && (!sr || (hd ? h <= 1080 : h >= 1080 || h == 720))) allowed.push_back(h);
+	if (hd)
+		for (const int h: LowRenderHeights)
+			if (sr || h >= 540) allowed.push_back(h);
+	return allowed;
+}
+
+// The one last chosen for this upscaler, a higher one as the highest allowed, an unknown one as the
+// upscaler's default (DLSS 1080, the game's TAA 1440).
+int LauncherWindow::SelectedRender() const {
+	const auto allowed = AllowedRenderHeights();
+	if (allowed.empty()) return RenderForUpscaler() ? 1080 : 1440;
+	const int wanted = RenderForUpscaler() ? wanted_sr_ : wanted_taa_;
+	if (wanted > MaxRenderHeight()) return allowed.front();
+	for (const int candidate: {wanted, RenderForUpscaler() ? 1080 : 1440})
+		if (std::find(allowed.begin(), allowed.end(), candidate) != allowed.end()) return candidate;
+	return allowed.front();
+}
+
+// The DLSS mode a render height runs in: the emulator picks it from the height's share of the
+// game's output (95% DLAA, 62% Quality, 55% Balanced, 45% Performance, less Ultra Performance).
+std::string LauncherWindow::SuperResolutionMode(int height) const {
+	const double share  = static_cast<double>(height) / OutputLines();
+	const char*  native = commands_.FsrUpscaler() ? "fsr.native" : "dlss.dlaa";
+	return T(share >= 0.95   ? native
+	         : share >= 0.62 ? "dlss.quality"
+	         : share >= 0.55 ? "dlss.balanced"
+	         : share >= 0.45 ? "dlss.performance"
+	                         : "dlss.ultra");
+}
+
+std::string LauncherWindow::RenderLabel(int height) const {
+	if (RenderForUpscaler()) return Paren(std::to_string(height), SuperResolutionMode(height));
+	switch (height) {
+		case 2160: return Paren("2160", T("render.native"));
+		case 1512: return Paren("1512", T("render.pro"));
+		case 1440: return Paren("1440", T("render.ps5"));
+		default: return std::to_string(height);
+	}
+}
+
+std::string LauncherWindow::RenderNote() const {
+	int       h     = SelectedRender();
+	const int lines = OutputLines();
+	// (The 1080p and 1440p outputs' 3D is at most their height.)
+	const bool capped = lines < 2160 && h > lines;
+	if (capped) h = lines;
+	// (The PS5 Pro path's 4K output takes 1080 at least, or 720 for its Ultra Performance: a third
+	// of the output; the 1440p output 720 at least, or 480.)
+	const int  least  = lines == 1440 ? 720 : 1080;
+	const bool raised = RenderForUpscaler() && lines != 1080 && h < least && h != lines / 3;
+	if (raised) h = least;
+	const int w = static_cast<int>(std::floor(h * RatioAspect() / 8.0 + 0.5) * 8);
+	return F(capped   ? (lines == 1440 ? "render.capped1440" : "render.capped")
+	         : raised ? (lines == 1440 ? "render.raised1440" : "render.raised")
+	                  : "render.desc",
+	         {std::to_string(w), std::to_string(h)});
+}
+
+void LauncherWindow::GraphicsPage() {
+	PageTitle("graphics.title");
+	Section("graphics.resolution");
+	// (DLSS where it runs - an NVIDIA RTX card with its runtime built -, FSR 3 on any graphics
+	// card: built in.)
+	std::vector<std::string> upscalers {""};
+	std::vector<std::string> upscaler_labels {T("upscaler.game")};
+	if (dlss_available_) {
+		upscalers.emplace_back("dlss");
+		upscaler_labels.emplace_back(T("upscaler.dlss"));
+	}
+	upscalers.emplace_back("fsr");
+	upscaler_labels.emplace_back(T("upscaler.fsr"));
+	upscalers.emplace_back("fsr4");
+	upscaler_labels.emplace_back("FSR 4.1.2 (PS5 Pro path, experimental)");
+	// (No upscaler and no anti-aliasing: Commands' KYTY_GAME_CONVARS, issue #220.)
+	upscalers.emplace_back("off");
+	upscaler_labels.emplace_back(T("upscaler.off"));
+	const auto  chosen = S().Str("upscaler");
+	std::string note;
+	if (chosen == "fsr")
+		note = T("upscaler.fsrNote");
+	else if (chosen == "fsr4")
+		note = "Replaces Sony's upscaler through the same PS5 Pro patch as FSR 3.1. Select INT8 or experimental FP8 below and prepare assets in FSR4 setup. FP8 failures use INT8 where possible; unavailable FSR4 falls back to FSR 3.";
+	else if (chosen == "off")
+		note = T("upscaler.offNote");
+	else
+		note = T(dlss_available_ ? "upscaler.ok"
+		         : !context_.rtx ? "upscaler.noRtx"
+		                         : "upscaler.noLibrary");
+	Row(
+	    "upscaler",
+	    [&] {
+		    int index =
+		        std::max(0, static_cast<int>(std::find(upscalers.begin(), upscalers.end(), chosen) -
+		                                     upscalers.begin()));
+		    if (index >= static_cast<int>(upscalers.size())) index = 0;
+		    if (Combo("##upscaler", &index, upscaler_labels, 300)) {
+			    S().Set("upscaler", upscalers[static_cast<size_t>(index)]);
+			    Changed();
+		    }
+	    },
+	    note);
+
+    Row("fsr4.precision", [&] {
+        const std::vector<std::string> labels {"INT8", "FP8 (RDNA4, experimental)"};
+        int index = S().Str("fsr4_precision") == "fp8" ? 1 : 0;
+        ImGui::BeginDisabled(S().Str("upscaler") != "fsr4");
+        if (Combo("##fsr4precision", &index, labels, 300)) {
+            S().Set("fsr4_precision", index == 1 ? "fp8" : "int8"); Changed();
+        }
+        ImGui::EndDisabled();
+    }, "FP8 uses native float8 matrix multiplication with FP16/FP32 compatibility staging. Unsupported FP8 features/assets fall back to INT8; the watermark reports the active precision. Applies next launch.");
+    Row("fsr4.radv", [&] {
+        ImGui::TextUnformatted(S().Str("upscaler") == "fsr4" && S().Str("fsr4_precision") == "fp8"
+            ? "Enabled automatically with FP8" : "Enabled when FP8 is selected");
+    }, "Selecting FSR 4 FP8 automatically enables Mesa RADV's experimental matrix conversions for the game process. No separate toggle is needed. Applies next launch.");
+    Row("fsr4.watermark", [&] { SettingSwitch("##fsr4watermark", "fsr4_watermark", S().Str("upscaler") == "fsr4"); },
+        "Emulator status watermark: active FP8/INT8, INT8 when FP8 is unavailable, awaiting upscale, or FSR 3.1 fallback. Applies next launch.");
+
+    Row(nullptr, [&] { if (FlatButton("Set up FSR 4.1.2 assets...")) page_ = 7; },
+        "Choose your AMD DLL and generate the assets from the FSR4 setup page.");
+	const auto allowed  = AllowedRenderHeights();
+	const int  selected = SelectedRender();
+	// (The effective height is what is saved, as the Windows launcher's form saves it.)
+	if (S().Int(RenderForUpscaler() ? "render_dlss" : "render") != selected) {
+		S().Set(RenderForUpscaler() ? "render_dlss" : "render", selected);
+	}
+	Row(
+	    "render",
+	    [&] {
+		    std::vector<std::string> labels;
+		    for (const int h: allowed)
+			    labels.push_back(RenderLabel(h));
+		    int index = static_cast<int>(std::find(allowed.begin(), allowed.end(), selected) -
+		                                 allowed.begin());
+		    if (Combo("##render", &index, labels, 300)) {
+			    const int h = allowed[static_cast<size_t>(index)];
+			    (RenderForUpscaler() ? wanted_sr_ : wanted_taa_) = h;
+			    S().Set(RenderForUpscaler() ? "render_dlss" : "render", h);
+			    Changed();
+		    }
+	    },
+	    RenderNote());
+
+	const std::vector<std::string> outputs {"auto", "4k", "1080p", "1440p"};
+	Row(
+	    "output",
+	    [&] {
+		    int index = static_cast<int>(
+		        std::find(outputs.begin(), outputs.end(), S().Str("output")) - outputs.begin());
+		    if (index >= 4) index = 0;
+		    if (Combo("##output", &index,
+		              {T("output.auto"), T("output.4k"), T("output.1080"), T("output.1440")},
+		              300)) {
+			    S().Set("output", outputs[static_cast<size_t>(index)]);
+			    Changed();
+		    }
+	    },
+	    std::string(T("output.desc")) +
+	        (S().Str("output") == "auto"
+	             ? " " + F("output.autoNow", {HdOutputChosen() ? "1080p" : "4K"})
+	         : S().Str("output") == "1440p" && !RenderForUpscaler()
+	             ? " " + std::string(T("output.1440NoUpscaler"))
+	             : ""));
+
+	// The DLSS model (KYTY_DLSS_PRESET): the DLSS version's own choice, its transformer or its CNN
+	// model.
+	const std::vector<std::string> presets {"", "K", "E"};
+	Row(
+	    "dlssmodel",
+	    [&] {
+		    int index =
+		        static_cast<int>(std::find(presets.begin(), presets.end(), S().Str("dlss_preset")) -
+		                         presets.begin());
+		    if (index >= 3) index = 0;
+		    if (Combo("##dlssmodel", &index,
+		              {T("dlssmodel.auto"), T("dlssmodel.k"), T("dlssmodel.e")}, 300,
+		              commands_.Dlss())) {
+			    S().Set("dlss_preset", presets[static_cast<size_t>(index)]);
+			    Changed();
+		    }
+	    },
+	    T("dlssmodel.desc"));
+
+	// DLSS's sharpening (KYTY_DLSS_SHARPNESS): none by default; the game's own TAA sharpens, DLSS
+	// does not (issue #224).
+	const std::vector<std::string> sharpnesses {"", "0.3", "0.6", "0.9"};
+	Row(
+	    "dlsssharp",
+	    [&] {
+		    int index = static_cast<int>(
+		        std::find(sharpnesses.begin(), sharpnesses.end(), S().Str("dlss_sharpness")) -
+		        sharpnesses.begin());
+		    if (index >= 4) index = 0;
+		    if (Combo("##dlsssharp", &index,
+		              {T("dlsssharp.off"), T("dlsssharp.low"), T("dlsssharp.medium"),
+		               T("dlsssharp.high")},
+		              300, commands_.Dlss())) {
+			    S().Set("dlss_sharpness", sharpnesses[static_cast<size_t>(index)]);
+			    Changed();
+		    }
+	    },
+	    T("dlsssharp.desc"));
+
+	Section("graphics.detail");
+	const std::vector<std::string> qualities {"standard", "low", "lowest"};
+	Row(
+	    "quality",
+	    [&] {
+		    int index = static_cast<int>(
+		        std::find(qualities.begin(), qualities.end(), Lower(S().Str("quality"))) -
+		        qualities.begin());
+		    if (index >= 3) index = 0;
+		    if (Combo("##quality", &index,
+		              {T("quality.standard"), T("quality.low"), T("quality.lowest")}, 300)) {
+			    S().Set("quality", qualities[static_cast<size_t>(index)]);
+			    Changed();
+		    }
+	    },
+	    T("quality.desc"));
+
+	Section("graphics.fg");
+	Row(
+	    "framegen",
+	    [&] {
+		    std::vector<std::string> labels {T("framegen.off")};
+		    for (int x = 2; x <= 6; ++x)
+			    labels.push_back(std::to_string(x) + "x");
+		    const int value = S().Int("framegen");
+		    int       index = dlss_available_ && value >= 2 ? value - 1 : 0;
+		    // (Kept as it was where DLSS's runtime is missing.)
+		    if (Combo("##framegen", &index, labels, 160, dlss_available_)) {
+			    S().Set("framegen", index > 0 ? index + 1 : 0);
+			    Changed();
+		    }
+	    },
+	    T(dlss_available_ ? "framegen.ok"
+	      : !context_.rtx ? "framegen.noRtx"
+	                      : "framegen.noLibrary"));
+	Row(
+	    "dlssruntime",
+	    [&] {
+		    if (FlatButton(T("button.getdlss"), !context_.dlss_script.empty()))
+			    StartInTerminal(commands_.GetDlss());
+		    ImGui::SameLine();
+		    ImGui::AlignTextToFramePadding();
+		    const auto        library = context_.DlssLibrary();
+		    const std::string state =
+		        context_.dlss_script.empty() && library.empty() ? T("dlssruntime.noScript")
+		        : library.empty()                               ? T("dlssruntime.none")
+		                          : F("dlssruntime.found", {library.parent_path().string()});
+		    ImGui::PushStyleColor(ImGuiCol_Text, V(library.empty() ? TextDimColor : GoodColor));
+		    ImGui::TextUnformatted(state.c_str());
+		    ImGui::PopStyleColor();
+	    },
+	    T("dlssruntime.desc"));
+	Row(
+	    nullptr,
+	    [&] {
+		    SettingSwitch("##fsr", "fsr");
+		    ImGui::SameLine(0, 12.0f * scale_);
+		    ImGui::AlignTextToFramePadding();
+		    ImGui::PushTextWrapPos(0.0f);
+		    ImGui::TextUnformatted(T("fsr"));
+		    ImGui::PopTextWrapPos();
+	    },
+	    T("fsr.desc"));
+}
+
+// ------------------------------------------------------------ Game
+
+void LauncherWindow::GamePage() {
+	PageTitle("game.title");
+	Section("game.console");
+	Row(
+	    "language",
+	    [&] {
+		    int index = S().Int("language");
+		    if (Combo("##language", &index, Strings::ConsoleLanguages(), 340)) {
+			    S().Set("language", index);
+			    Changed();
+		    }
+	    },
+	    T("language.desc"));
+	// What the game is told its sound goes to (KYTY_AUDIO_OUTPUT, issue #207): it mixes for it.
+	const std::vector<std::string> audio_outputs {"", "headphones", "amplifier", "soundbar"};
+	Row(
+	    "audiooutput",
+	    [&] {
+		    int index = static_cast<int>(
+		        std::find(audio_outputs.begin(), audio_outputs.end(), S().Str("audio_output")) - audio_outputs.begin());
+		    if (index >= 4) index = 0;
+		    if (Combo("##audiooutput", &index,
+		              {T("audiooutput.tv"), T("audiooutput.headphones"), T("audiooutput.amplifier"),
+		               T("audiooutput.soundbar")},
+		              340)) {
+			    S().Set("audio_output", audio_outputs[static_cast<size_t>(index)]);
+			    Changed();
+		    }
+	    },
+	    T("audiooutput.desc"));
+	Section("game.cheats");
+	Row(
+	    "cheats",
+	    [&] {
+		    SettingSwitch("##cheats", "cheats");
+		    ImGui::SameLine(0, 16.0f * scale_);
+		    if (FlatButton(T("button.cheats"))) OpenCheats();
+		    ImGui::SameLine(0, 14.0f * scale_);
+		    ImGui::AlignTextToFramePadding();
+		    std::string state;
+		    if (!game_.Found()) {
+			    state = T("cheats.noGame");
+		    } else if (const auto file = game_.CheatFile(context_.root); file.empty()) {
+			    state = T("cheats.noFile");
+		    } else {
+			    const auto cheats = CheatFile::Load(file);
+			    const auto on     = std::count_if(cheats.mods.begin(), cheats.mods.end(),
+			                                      [](const CheatMod& m) { return m.enabled; });
+			    state = F("cheats.count", {std::to_string(on), std::to_string(cheats.mods.size())});
+		    }
+		    ImGui::PushStyleColor(ImGuiCol_Text, V(TextDimColor));
+		    ImGui::TextUnformatted(state.c_str());
+		    ImGui::PopStyleColor();
+	    },
+	    T("cheats.desc"));
+}
+
+// ------------------------------------------------------------ FSR4 setup
+fs::path LauncherWindow::FsrAssetFolder() const {
+    if (const char* path = std::getenv("KYTY_FSR412_DIR"); path && *path) return fs::absolute(path);
+    return context_.root / "fsr4_412";
+}
+void LauncherWindow::PrepareFsrAssets(const std::string& dll) {
+    fsr_dll_ = dll; page_ = 7; StartFsrAssets();
+}
+void LauncherWindow::StartFsrAssets() {
+    std::error_code error;
+    const auto dll = fs::absolute(Trim(fsr_dll_)).lexically_normal();
+    if (!fs::is_regular_file(dll, error)) { Message("Choose an existing AMD upscaler DLL first."); return; }
+    fs::path script = Platform::ExecutableFolder() / "tools/fsr412-vk/build_assets.sh";
+    if (const char* path = std::getenv("KYTY_FSR412_BUILD_SCRIPT"); path && *path) script = path;
+    if (!fs::is_regular_file(script, error)) script = context_.root / "tools/fsr412-vk/build_assets.sh";
+    if (!fs::is_regular_file(script, error)) { Message("The native FSR4 extraction tools are missing from this installation."); return; }
+    S().Set("fsr412_dll", dll.string()); S().Save();
+    const auto log = context_.LogsFolder() / ("fsr412-build-" + std::to_string(std::time(nullptr)) + ".log");
+    fsr_started_ = std::chrono::steady_clock::now();
+    fsr_builder_.Start({"env", "PYTHONUNBUFFERED=1", "bash", script.string(), dll.string(),
+        FsrAssetFolder().string()}, log, [] { Wake(); });
+}
+void LauncherWindow::FsrSetupPage() {
+    PageTitle("nav.fsrsetup");
+    auto status = fsr_builder_.Snapshot();
+    Desc("Prepare native FSR 4.1.2 INT8 and FP8 from the Vulkan DLL in AMD FSR SDK 2.4.0. Extraction and gameplay run on Linux; the AppImage includes the preparation tools.");
+    Row("fsrsetup.dll", [&] {
+        ImGui::BeginDisabled(status.running);
+        ImGui::SetNextItemWidth(-1);
+        if (ImGui::InputTextWithHint("##fsrdll", "amd_fidelityfx_upscaler_vk.dll (4.1.2.4555)", &fsr_dll_)) {
+            S().Set("fsr412_dll", Trim(fsr_dll_)); Changed();
+        }
+        if (FlatButton("Choose DLL...")) PickFolder(false, false, true);
+        ImGui::EndDisabled();
+    }, "Choose amd_fidelityfx_upscaler_vk.dll from SDK 2.4.0. Its exact version and hash are checked before extraction; other DLLs are rejected.");
+    Row("fsrsetup.build", [&] {
+        if (FlatButton("Build FSR4 INT8 + FP8 assets", !status.running && !Trim(fsr_dll_).empty())) StartFsrAssets();
+        ImGui::SameLine();
+        if (FlatButton("Cancel", status.running)) fsr_builder_.Cancel();
+    });
+    ImGui::PushTextWrapPos(0);
+    ImGui::TextUnformatted(status.stage.c_str());
+    if (status.running) {
+        const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - fsr_started_).count();
+        ImGui::Text("Elapsed: %lld:%02lld - stage progress, no estimated completion time", static_cast<long long>(seconds / 60), static_cast<long long>(seconds % 60));
+        ImGui::ProgressBar(-static_cast<float>(ImGui::GetTime()), {-1, 0}, "Working...");
+    }
+    static auto checked = std::chrono::steady_clock::time_point{};
+    static fs::path checked_path;
+    static bool installed = false, installed_fp8 = false;
+    static bool was_running = false;
+    const auto now = std::chrono::steady_clock::now();
+    if (checked_path != FsrAssetFolder() || (was_running && !status.running) || now - checked > std::chrono::seconds(1)) {
+        checked_path = FsrAssetFolder(); installed = AssetBuilder::Installed(checked_path); installed_fp8 = AssetBuilder::InstalledFp8(checked_path); checked = now;
+    }
+    was_running = status.running;
+    if (!status.running && status.exit_code == 0)
+        ImGui::TextUnformatted((installed && installed_fp8) ? "Success: complete INT8 and FP8 assets found. Restart the game to use them." : "Preparation exited successfully, but INT8 or FP8 assets are incomplete. See the log.");
+    else {
+        ImGui::TextUnformatted(installed ? "INT8 assets: complete." : "INT8 assets: not prepared.");
+        ImGui::TextUnformatted(installed_fp8 ? "FP8 assets: complete." : "FP8 assets: not prepared; build assets above to add FP8.");
+    }
+    ImGui::Text("Assets: %s", FsrAssetFolder().c_str());
+    if (!status.log_path.empty()) ImGui::Text("Full log: %s", status.log_path.c_str());
+    ImGui::PopTextWrapPos();
+    std::error_code folder_error;
+    if (FlatButton("Open asset folder", fs::is_directory(FsrAssetFolder(), folder_error))) Platform::Open(FsrAssetFolder().string());
+    ImGui::SameLine();
+    if (FlatButton("Open build log", !status.log_path.empty())) Platform::Open(status.log_path);
+    bool follow = S().Bool("fsr4_log_follow");
+    if (ImGui::Checkbox("Follow output", &follow)) { S().Set("fsr4_log_follow", follow); Changed(); }
+    ImGui::BeginChild("##fsrbuildlog", {0, 240.0f * scale_}, ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar);
     ImGui::TextUnformatted(status.output.empty() ? "Preparation output will appear here, including shader and model checks and any errors." : status.output.c_str());
     if (follow) ImGui::SetScrollHereY(1.0f);
     ImGui::EndChild();
