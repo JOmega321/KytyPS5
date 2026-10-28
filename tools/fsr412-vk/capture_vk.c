@@ -10,6 +10,7 @@
 #include <string.h>
 
 #define LIMIT 16384
+#define BINDINGS 512
 typedef struct Object {
     uint64_t size, memory, offset;
     unsigned char *data;
@@ -73,6 +74,10 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceProperties2(VkPhysicalDevice d,VkP
     for(VkBaseOutStructure *s=p->pNext;s;s=s->pNext) {
         LOG("{\"op\":\"property_query\",\"type\":%u}\n",s->sType);
         switch(s->sType) {
+        case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES: {
+            VkPhysicalDeviceIDProperties *v=(void*)s;memset(v->deviceUUID,1,VK_UUID_SIZE);memset(v->driverUUID,2,VK_UUID_SIZE);break;}
+        case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES: {
+            VkPhysicalDeviceDriverProperties *v=(void*)s;v->driverID=VK_DRIVER_ID_MESA_RADV;strcpy(v->driverName,"synthetic offline recorder");break;}
         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES: {
             VkPhysicalDeviceSubgroupProperties *v=(void*)s;v->subgroupSize=32;v->supportedStages=VK_SHADER_STAGE_COMPUTE_BIT;v->supportedOperations=0xff;v->quadOperationsInAllStages=1;break;}
         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_PROPERTIES: {
@@ -83,7 +88,8 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceProperties2(VkPhysicalDevice d,VkP
             break;}
         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_PROPERTIES_KHR:
             ((VkPhysicalDeviceCooperativeMatrixPropertiesKHR*)s)->cooperativeMatrixSupportedStages=VK_SHADER_STAGE_COMPUTE_BIT;break;
-        default: fail("unsupported property query (see trace)");
+        // Caller initialized the remaining fields. Unsupported optional properties stay zero.
+        default: LOG("{\"op\":\"unsupported_property\",\"type\":%u}\n",s->sType);break;
         }
     }
 }
@@ -99,7 +105,7 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceFeatures2(VkPhysicalDevice d,VkPhy
         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT8_FEATURES_EXT: { VkPhysicalDeviceShaderFloat8FeaturesEXT *v=(void*)s;v->shaderFloat8=v->shaderFloat8CooperativeMatrix=fp8;break; }
         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR: { VkPhysicalDeviceCooperativeMatrixFeaturesKHR *v=(void*)s;v->cooperativeMatrix=v->cooperativeMatrixRobustBufferAccess=fp8;break; }
         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_MIXED_FLOAT_DOT_PRODUCT_FEATURES_VALVE: { VkPhysicalDeviceShaderMixedFloatDotProductFeaturesVALVE *v=(void*)s;v->shaderMixedFloatDotProductFloat16AccFloat32=v->shaderMixedFloatDotProductFloat16AccFloat16=1;v->shaderMixedFloatDotProductFloat8AccFloat32=fp8;break; }
-        default: fail("unsupported feature query (see trace)");
+        default: LOG("{\"op\":\"unsupported_feature\",\"type\":%u}\n",s->sType);break;
         }
     }
 }
@@ -170,12 +176,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateComputePipelines(VkDevice d,VkPipelineCac
     }return VK_SUCCESS;
 }
 VKAPI_ATTR VkResult VKAPI_CALL vkAllocateDescriptorSets(VkDevice d,const VkDescriptorSetAllocateInfo *p,VkDescriptorSet *out) {
-    (void)d;for(uint32_t i=0;i<p->descriptorSetCount;i++){uint64_t h=make();out[i]=(VkDescriptorSet)(uintptr_t)h;objects[h].data=calloc(128,sizeof(Object));if(!objects[h].data)fail("descriptor allocation");}return VK_SUCCESS;
+    (void)d;for(uint32_t i=0;i<p->descriptorSetCount;i++){uint64_t h=make();out[i]=(VkDescriptorSet)(uintptr_t)h;objects[h].data=calloc(BINDINGS,sizeof(Object));if(!objects[h].data)fail("descriptor allocation");}return VK_SUCCESS;
 }
 VKAPI_ATTR VkResult VKAPI_CALL vkFreeDescriptorSets(VkDevice d,VkDescriptorPool pool,uint32_t n,const VkDescriptorSet *sets) { (void)d;(void)pool;for(uint32_t i=0;i<n;i++){free(OBJ(sets[i]).data);OBJ(sets[i]).data=NULL;}return VK_SUCCESS; }
 VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(VkDevice d,uint32_t n,const VkWriteDescriptorSet *p,uint32_t copies,const VkCopyDescriptorSet *copy) {
     (void)d;(void)copy;if(copies)fail("descriptor copies unsupported");for(uint32_t i=0;i<n;i++) {
-        if(p[i].dstBinding>=128 || p[i].dstArrayElement || p[i].descriptorCount!=1)fail("descriptor array unsupported");
+        if(p[i].dstBinding>=BINDINGS || p[i].dstArrayElement || p[i].descriptorCount!=1)fail("descriptor array unsupported");
         Object *o=(Object*)OBJ(p[i].dstSet).data+p[i].dstBinding;o->usage=p[i].descriptorType;o->stride=1;
         switch(p[i].descriptorType) {
         case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER: o->buffer=*p[i].pBufferInfo;break;
@@ -191,12 +197,13 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(VkCommandBuffer c,VkPipelineB
 }
 VKAPI_ATTR void VKAPI_CALL vkCmdDispatch(VkCommandBuffer c,uint32_t x,uint32_t y,uint32_t z) {
     (void)c;checked(pipeline);LOG("{\"op\":\"dispatch\",\"frame\":%u,\"pipeline\":%"PRIu64",\"groups\":[%u,%u,%u],\"bindings\":[",frame,pipeline,x,y,z);int comma=0;
-    for(uint32_t set=0;set<8;set++)if(sets[set])for(uint32_t binding=0;binding<128;binding++) {
+    for(uint32_t set=0;set<8;set++)if(sets[set])for(uint32_t binding=0;binding<BINDINGS;binding++) {
         Object *o=(Object*)objects[checked(sets[set])].data+binding;if(!o->stride)continue;
         LOG("%s{\"set\":%u,\"binding\":%u,\"type\":%u",comma++?",":"",set,binding,o->usage);
         if(o->usage==VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER || o->usage==VK_DESCRIPTOR_TYPE_STORAGE_BUFFER) {
             LOG(",\"buffer\":%"PRIu64",\"offset\":%"PRIu64",\"range\":%"PRIu64,ID(o->buffer.buffer),(uint64_t)o->buffer.offset,(uint64_t)o->buffer.range);
-            if(o->usage==VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER) {char name[80];dump(ID(o->buffer.buffer),o->buffer.offset,o->buffer.range,name,sizeof(name));LOG(",\"data\":\"%s\"",name);}
+            uint64_t remaining=OBJ(o->buffer.buffer).size-o->buffer.offset;
+            if(o->usage==VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER || remaining<=1024*1024) {char name[80];dump(ID(o->buffer.buffer),o->buffer.offset,o->buffer.range,name,sizeof(name));LOG(",\"data\":\"%s\"",name);}
         } else if(o->usage==VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER || o->usage==VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER)LOG(",\"view\":%"PRIu64,o->resource);
         else LOG(",\"view\":%"PRIu64",\"sampler\":%"PRIu64",\"layout\":%u",ID(o->image.imageView),ID(o->image.sampler),o->image.imageLayout);
         LOG("}");
