@@ -38,15 +38,17 @@ jobs:
           curl -fL --retry 3 -o _Build/appimagetool https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
           echo 'ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0  _Build/appimagetool' | sha256sum -c
           chmod +x _Build/appimagetool
+          curl -fL --retry 3 -o _Build/runtime-x86_64 https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64
+          echo '617aa77314d57c8b8e4fae9c3f0b35af7b30d5529cb69e98f64f92510ed98a46  _Build/runtime-x86_64' | sha256sum -c
           mkdir -p _Build/output
-          ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 _Build/appimagetool _Build/KytyPS5.AppDir "_Build/output/KytyPS5-chenxiao07-${GITHUB_SHA:0:8}-x86_64.AppImage"
+          ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 _Build/appimagetool --runtime-file _Build/runtime-x86_64 _Build/KytyPS5.AppDir "_Build/output/KytyPS5-chenxiao07-${GITHUB_SHA:0:8}-x86_64.AppImage"
           cd _Build/output
           sha256sum *.AppImage > SHA256SUMS
       - name: Validate final AppImage
         run: |
           set -euo pipefail
           image="$(realpath _Build/output/*.AppImage)"
-          mkdir -p '_Build/smoke home'
+          mkdir -p '_Build/smoke home' _Build/screenshots
           export HOME="$PWD/_Build/smoke home"
           export XDG_DATA_HOME="$HOME/data" XDG_CONFIG_HOME="$HOME/config" XDG_CACHE_HOME="$HOME/cache"
           unset LD_LIBRARY_PATH QT_PLUGIN_PATH QT_QPA_PLATFORM_PLUGIN_PATH
