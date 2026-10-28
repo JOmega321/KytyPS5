@@ -56,6 +56,28 @@ jobs:
               assert [(p['entry'],p['sha256'],p['groups']) for p in passes]==[(p['entry'],p['sha256'],p['groups']) for p in new['frames'][k]]
           PY
           for shader in _Build/native-assets/t1080_m0/*.spv; do spirv-val --target-env vulkan1.3 "$shader"; done
+      - name: Record and audit remaining INT8 tiers and quality families
+        env:
+          WINEDEBUG: '-all'
+          WINEARCH: win64
+          WINEDLLOVERRIDES: 'vulkan-1=n;mscoree,mshtml='
+        run: |
+          export WINEPREFIX="$PWD/_Build/wine-prefix"
+          bin="$PWD/_Build/capture-bin"
+          root="$PWD"
+          while read -r set render output; do
+            mkdir -p "$root/_Build/capture-$set"
+            cd "$root/_Build/capture-$set"
+            timeout 120 /usr/lib/wine/wine64 "$bin/capture.exe" "Z:$bin/amd_fidelityfx_upscaler_vk.dll" int8 "$render" "$output" 3
+            cd "$root"
+            python3 tools/fsr412-vk/analyze_capture.py "_Build/capture-$set" _Build/capture-bin/amd_fidelityfx_upscaler_vk.dll "_Build/host-capture-$set.json"
+            python3 tools/fsr412-vk/check_replay_contract.py "_Build/host-capture-$set.json" "$render" "$output"
+          done <<'CASES'
+          t1080_m1 640x360 1920x1080
+          t2160_m0 2560x1440 3840x2160
+          t2160_m1 1280x720 3840x2160
+          t1440_m0 1280x720 2560x1440
+          CASES
       - name: Build current-enough Khronos validation layer
         run: bash tools/fsr412-vk/build-validation.sh "$PWD/_Build/validation" "$PWD/_Build/vulkan-headers"
       - name: Build and execute native frames with software Vulkan and validation
@@ -95,7 +117,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: fsr412-host-audit
-          path: _Build/host-capture-int8.json
+          path: _Build/host-capture-*.json
           if-no-files-found: ignore
           retention-days: 30
   prototype:

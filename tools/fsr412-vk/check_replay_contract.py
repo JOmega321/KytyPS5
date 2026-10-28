@@ -33,16 +33,17 @@ def groups(name, rw, rh, ow, oh):
     if name.endswith('_post'):
         level = [1,1,1,2,2,2,3,3,3,2,2,1,1][k]
         w,h = aw>>level,ah>>level
-        kx = min((((1920>>level)+3)//4)*4+1-w,5)
-        ky = min((1080>>level)+1-h,1)
+        tw, th = (3840, 2160) if ow > 1920 or oh > 1080 else (1920, 1080)
+        kx = min((((tw>>level)+3)//4)*4+1-w,5)
+        ky = min((th>>level)+1-h,1)
         return [ceil((w+1+kx)+h+h*kx+(w+1+kx)*ky,32),1,1]
     level = [1,1,1,2,2,2,3,3,3,3,2,2,1][k]
     return [ceil(aw>>level,64),ah>>level,1]
 
 
 def check(audit,rw,rh,ow,oh):
-    if audit['synthetic_profile'] != 'int8' or ow>1920 or oh>1080:
-        raise ValueError('only the normal INT8 1080p model is supported by this checker')
+    if audit['synthetic_profile'] != 'int8' or not 0<rw<=ow<=3840 or not 0<rh<=oh<=2160:
+        raise ValueError('expected a supported INT8 render/output size')
     checked = 0
     for key, frame in audit['frames'].items():
         number = int(key)
