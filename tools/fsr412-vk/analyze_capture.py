@@ -13,6 +13,7 @@ from pathlib import Path
 import struct
 
 from extract_vk import reflect
+from prune_bindings import prune_unused_bindings
 
 
 def local_file(root, name):
@@ -46,7 +47,8 @@ def analyze(root, dll):
             views[e['id']] = e
         elif op == 'pipeline':
             code = local_file(root, e['shader'])
-            info = reflect(code)
+            reflected_code,pruned=prune_unused_bindings(code) if profile and profile['fp8'] else (code,[])
+            info = reflect(reflected_code)
             if e['entry'] not in [x['name'] for x in info['entry_points']]:
                 raise ValueError('pipeline entry does not match shader')
             pipelines[e['id']] = {**e, 'sha256': hashlib.sha256(code).hexdigest(), 'reflection': info}
