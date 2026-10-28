@@ -115,7 +115,7 @@ bool Commands::Dlss() const {
 }
 
 bool Commands::FsrUpscaler() const {
-	return S().Str("upscaler") == "fsr";
+	return S().Str("upscaler") == "fsr" || S().Str("upscaler") == "fsr4";
 }
 
 int Commands::WindowHeight(const std::string& resolution, bool fullscreen, int display) {
@@ -271,7 +271,7 @@ Launch Commands::Play(const GameInfo& game, bool direct) const {
 	if (dlss)
 		Put(set, "KYTY_UPSCALER", "dlss");
 	else if (FsrUpscaler())
-		Put(set, "KYTY_UPSCALER", "fsr");
+		Put(set, "KYTY_UPSCALER", S().Str("upscaler"));
 	// (With DLSS too: its PS5 Pro path then makes the 1080p output, the 3D at most 1080 high.)
 	if (HdOutput())
 		Put(set, "KYTY_HD_OUTPUT", "1");

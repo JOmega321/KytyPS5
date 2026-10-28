@@ -30,6 +30,7 @@ static.mkdir(parents=True)
 for source in (root / 'tools/local/static-precompile').glob('*'):
     if source.name == 'pass-states.json' or source.suffix == '.hints':
         shutil.copy2(source, static)
+shutil.copytree(root / 'tools/fsr4cap', payload / 'tools/fsr4cap')
 shutil.copy2(root / 'LICENSE', payload)
 shutil.copytree(root / 'LICENSES', payload / 'LICENSES')
 for base in (root / '3rdparty', build / '_deps'):

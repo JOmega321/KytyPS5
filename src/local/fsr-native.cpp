@@ -1,4 +1,5 @@
 #include "local/fsr-native.h"
+#include "local/fsr4.h"
 
 #include "graphics/host_gpu/graphicContext.h"
 #include "local/live-switch.h"
@@ -69,7 +70,7 @@ bool UpscalerRequested() {
 #if KYTY_FSR_NATIVE
 	static const bool requested = [] {
 		const char* value = std::getenv("KYTY_UPSCALER");
-		return value != nullptr && std::string_view(value) == "fsr";
+		return value != nullptr && (std::string_view(value) == "fsr" || std::string_view(value) == "fsr4");
 	}();
 	return requested || g_instead_of_dlss.load(std::memory_order_relaxed);
 #else
@@ -493,7 +494,10 @@ Interpolator& TheInterpolator() {
 } // namespace
 
 bool Upscale(GraphicContext& graphics, vk::CommandBuffer command, const FrameGen::UpscaleInputs& inputs) {
-	return UpscalerRequested() && TheUpscaler().Record(graphics, command, inputs);
+	if (!UpscalerRequested()) return false;
+    const char* selected = std::getenv("KYTY_UPSCALER");
+    if (selected && std::string_view(selected) == "fsr4" && Fsr4Upscale(graphics, command, inputs)) return true;
+    return TheUpscaler().Record(graphics, command, inputs);
 }
 
 bool Interpolate(GraphicContext& graphics, vk::CommandBuffer command, const InterpolationInputs& inputs,

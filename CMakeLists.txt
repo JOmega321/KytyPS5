@@ -448,6 +448,8 @@ list(APPEND kyty_emulator_src
 	"${KYTY_SOURCE_DIR}/local/anti-lag.cpp"
 	"${KYTY_SOURCE_DIR}/local/fsr-native.h"
 	"${KYTY_SOURCE_DIR}/local/fsr-native.cpp"
+	"${KYTY_SOURCE_DIR}/local/fsr4.cpp"
+	"${KYTY_SOURCE_DIR}/local/fsr411/fsr411.cpp"
 	"${KYTY_SOURCE_DIR}/local/debug-snapshot.h"
 	"${KYTY_SOURCE_DIR}/local/debug-snapshot.cpp"
 	"${KYTY_SOURCE_DIR}/local/perf-overlay.h"

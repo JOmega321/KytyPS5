@@ -31,7 +31,9 @@ cp -a "$runtime/dlss-bridge" "$KYTY_APPIMAGE_DATA_DIR/"
 export KYTY_DLSS_DIR="$KYTY_APPIMAGE_DATA_DIR/dlss"
 mkdir -p -- "$KYTY_DLSS_DIR"
 cd -- "$KYTY_APPIMAGE_DATA_DIR"
+export KYTY_FSR411_DIR="${KYTY_FSR411_DIR:-$KYTY_APPIMAGE_DATA_DIR/fsr4_411}"
 case "${1:-}" in
+    --build-fsr411) shift; export BB_FSR411_OUT="$KYTY_FSR411_DIR"; exec bash "$runtime/tools/fsr4cap/build_assets.sh" "$@" ;;
     --emulator) shift; exec "$runtime/kyty_emulator" "$@" ;;
     --precompile) shift; exec "$runtime/kyty_shader_precompile" "$@" ;;
 esac

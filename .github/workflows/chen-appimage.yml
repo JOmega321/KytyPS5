@@ -1,7 +1,7 @@
 name: chenxiao07 AppImage
 on:
   push:
-    branches: [appimage-chenxiao07]
+    branches: [appimage-chenxiao07, chen-kytyps5-fsr4]
   workflow_dispatch:
 permissions:
   contents: read

@@ -1036,6 +1036,8 @@ void LauncherWindow::GraphicsPage() {
 	}
 	upscalers.emplace_back("fsr");
 	upscaler_labels.emplace_back(T("upscaler.fsr"));
+	upscalers.emplace_back("fsr4");
+	upscaler_labels.emplace_back("FSR 4.1.1 (experimental, INT8)");
 	// (No upscaler and no anti-aliasing: Commands' KYTY_GAME_CONVARS, issue #220.)
 	upscalers.emplace_back("off");
 	upscaler_labels.emplace_back(T("upscaler.off"));

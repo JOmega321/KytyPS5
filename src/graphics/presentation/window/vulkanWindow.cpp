@@ -939,7 +939,33 @@ static vk::Device VulkanCreateDevice(vk::PhysicalDevice physical_device, const V
 		supported_executables.pNext = supported_features2.pNext;
 		supported_features2.pNext   = &supported_executables;
 	}
+    // VK_VALVE_shader_mixed_float_dot_product is newer than the pinned headers.
+    // Layout/structure type from Khronos Vulkan-Headers (extension 674).
+    struct MixedDotFeatures {
+        VkStructureType sType = static_cast<VkStructureType>(1000673000);
+        void* pNext = nullptr;
+        VkBool32 f16f32 = 0, f16f16 = 0, bf16 = 0, f8f32 = 0;
+    } fsr_mixed;
+    vk::PhysicalDeviceComputeShaderDerivativesFeaturesKHR fsr_derivatives{};
+    const char* fsr_choice = std::getenv("KYTY_UPSCALER");
+    const bool fsr_extensions = fsr_choice && std::string_view(fsr_choice) == "fsr4" &&
+        HasExtension(device_extensions, "VK_VALVE_shader_mixed_float_dot_product") &&
+        HasExtension(device_extensions, "VK_KHR_compute_shader_derivatives");
+    if (fsr_extensions) {
+        fsr_mixed.pNext = supported_features2.pNext;
+        fsr_derivatives.pNext = &fsr_mixed;
+        supported_features2.pNext = &fsr_derivatives;
+    }
 	physical_device.getFeatures2(&supported_features2);
+    graphics.fsr411_enabled = fsr_extensions && fsr_mixed.f16f32 && fsr_derivatives.computeDerivativeGroupLinear &&
+        supported_features12.shaderFloat16 && supported_features12.shaderInt8 &&
+        supported_features13.shaderIntegerDotProduct && supported_features2.features.shaderInt16 &&
+        supported_features2.features.shaderStorageImageExtendedFormats;
+    if (graphics.fsr411_enabled) {
+        features12.shaderFloat16 = VK_TRUE;
+        features12.shaderInt8 = VK_TRUE;
+    }
+
 	graphics.copy_memory_indirect_enabled = copy_indirect_extension && supported_copy_indirect.indirectCopy;
 	graphics.pipeline_statistics_enabled  = executable_extension && supported_executables.pipelineExecutableInfo;
 	LOGF("Vulkan indirect memory copies: %s\n", graphics.copy_memory_indirect_enabled ? "true" : "false");
@@ -1084,6 +1110,11 @@ static vk::Device VulkanCreateDevice(vk::PhysicalDevice physical_device, const V
 	                                           : static_cast<void*>(&fragment_barycentric);
 #endif
 	features13.robustImageAccess   = supported_features13.robustImageAccess;
+    if (graphics.fsr411_enabled) {
+        features13.shaderIntegerDotProduct = VK_TRUE;
+        device_features.shaderInt16 = VK_TRUE;
+        device_features.shaderStorageImageExtendedFormats = VK_TRUE;
+    }
 	features13.subgroupSizeControl = subgroup_size_control_enabled ? VK_TRUE : VK_FALSE;
 	features13.pipelineCreationCacheControl = supported_features13.pipelineCreationCacheControl;
 	graphics.pipeline_cache_control_enabled = features13.pipelineCreationCacheControl == VK_TRUE;
@@ -1174,6 +1205,13 @@ static vk::Device VulkanCreateDevice(vk::PhysicalDevice physical_device, const V
 	vk::Device device = nullptr;
 
 	VkPhysicalDeviceAntiLagFeaturesAMD anti_lag {};
+    if (graphics.fsr411_enabled) {
+        fsr_mixed.pNext = const_cast<void*>(create_info.pNext);
+        fsr_mixed.f16f16 = fsr_mixed.bf16 = fsr_mixed.f8f32 = VK_FALSE;
+        fsr_derivatives.pNext = &fsr_mixed;
+        fsr_derivatives.computeDerivativeGroupQuads = VK_FALSE;
+        create_info.pNext = &fsr_derivatives;
+    }
 	AntiLag::ChainFeature(physical_device, device_extensions, create_info, anti_lag);
 	// (Frame generation's device creation reserves host address space below 1 TiB: the range kept free for it, issue #45.)
 	LibKernel::Memory::ReleaseFrameGenAddressHole();
@@ -1670,6 +1708,10 @@ void WindowContext::CreateVulkan() {
 		}
 		AddPipelineBinaryExtensions(available_extensions, device_extensions);
 		AddCopyMemoryIndirectExtension(available_extensions, device_extensions);
+        if (const char* selected = std::getenv("KYTY_UPSCALER"); selected && std::string_view(selected) == "fsr4") {
+            for (const char* extension : {"VK_VALVE_shader_mixed_float_dot_product", "VK_KHR_compute_shader_derivatives"})
+                if (HasExtension(available_extensions, extension)) device_extensions.push_back(extension);
+        }
 		AntiLag::AddDeviceExtension(available_extensions, device_extensions); // (KYTY_LOW_LATENCY)
 		// KYTY_PIPELINE_STATS=<hash,...> (diagnostic): the driver's statistics of those compute programs' pipelines
 		// (registers, spills, waves per SIMD: PIPESTATS lines, CreatePipelineInternal).
@@ -1889,6 +1931,10 @@ bool CreateHeadlessGraphicContext(GraphicContext& graphic_ctx) {
 		}
 		AddPipelineBinaryExtensions(available_extensions, device_extensions);
 		AddCopyMemoryIndirectExtension(available_extensions, device_extensions);
+        if (const char* selected = std::getenv("KYTY_UPSCALER"); selected && std::string_view(selected) == "fsr4") {
+            for (const char* extension : {"VK_VALVE_shader_mixed_float_dot_product", "VK_KHR_compute_shader_derivatives"})
+                if (HasExtension(available_extensions, extension)) device_extensions.push_back(extension);
+        }
 	}
 #if !defined(__APPLE__)
 	{
