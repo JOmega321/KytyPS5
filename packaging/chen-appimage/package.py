@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Stage a native installation and bundle its non-driver ELF dependencies."""
 import os
+import hashlib
 import pathlib
 import re
 import shutil
@@ -30,11 +31,27 @@ for source in (root / 'tools/local/static-precompile').glob('*'):
         shutil.copy2(source, static)
 shutil.copy2(root / 'LICENSE', payload)
 shutil.copytree(root / 'LICENSES', payload / 'LICENSES')
+for base in (root / '3rdparty', build / '_deps'):
+    for source in base.rglob('*'):
+        if (source.is_file() and source.stat().st_size < 1024 * 1024
+                and re.match(r'^(licen[cs]e|copying|copyright|notice)([._-]|$)', source.name, re.I)
+                and '.git' not in source.parts and not any(p.endswith('-build') for p in source.parts)):
+            target = payload / 'LICENSES/thirdparty' / source.relative_to(base)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
 version = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
 (payload / 'version').write_text(version + '\n')
 (payload / 'build-manifest.txt').write_text(
     subprocess.check_output(['git', 'submodule', 'status', '--recursive'], cwd=root, text=True)
     + '\n' + (build / 'CMakeCache.txt').read_text())
+with (payload / 'build-manifest.txt').open('a') as manifest:
+    for command in (['clang', '--version'], ['cmake', '--version'], ['ldd', '--version']):
+        manifest.write('\n' + subprocess.check_output(command, text=True))
+    for dependency in sorted((build / '_deps').glob('*-src')):
+        revision = subprocess.check_output(['git', '-C', str(dependency), 'rev-parse', 'HEAD'], text=True)
+        manifest.write(dependency.name + ': ' + revision)
+    for archive in sorted((build / 'externals').glob('*.zip')):
+        manifest.write(archive.name + ': sha256 ' + hashlib.sha256(archive.read_bytes()).hexdigest() + '\n')
 libdir = payload / 'lib'
 libdir.mkdir()
 host = re.compile(r'^(ld-linux|lib(c|m|pthread|dl|rt|resolv|util)\.so|lib(GL|EGL|GLX|GLdispatch|OpenGL|vulkan|drm|gbm))')
@@ -55,6 +72,14 @@ while pending:
         seen.add(name)
         target = libdir / name
         shutil.copy2(source, target)
+        for candidate in (source, os.path.realpath(source)):
+            owner = subprocess.run(['dpkg-query', '-S', candidate], text=True, capture_output=True)
+            if owner.returncode == 0:
+                package = owner.stdout.split(': ', 1)[0].split(':', 1)[0]
+                notice = pathlib.Path('/usr/share/doc') / package / 'copyright'
+                if notice.exists():
+                    shutil.copy2(notice, payload / 'LICENSES' / (package + '-copyright.txt'))
+                    break
         pending.append(target)
 for elf in [*libdir.iterdir(), *(payload / n for n in ('kyty_emulator', 'kyty_launcher', 'kyty_shader_precompile'))]:
     rpath = '$ORIGIN' if elf.parent == libdir else '$ORIGIN/lib'
