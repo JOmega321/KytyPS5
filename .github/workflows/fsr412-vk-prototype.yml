@@ -35,9 +35,18 @@ jobs:
         if: always()
         run: |
           if test -f _Build/capture-int8/trace.jsonl; then
-            head -n 30 _Build/capture-int8/trace.jsonl
-            tail -n 4 _Build/capture-int8/trace.jsonl
+            head -n 50 _Build/capture-int8/trace.jsonl
+            tail -n 8 _Build/capture-int8/trace.jsonl
           fi
+      - name: Audit observed model initializers and dispatch sequence
+        run: python3 tools/fsr412-vk/analyze_capture.py _Build/capture-int8 _Build/capture-bin/amd_fidelityfx_upscaler_vk.dll _Build/host-capture-int8.json
+      - name: Upload host audit metadata only
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: fsr412-host-audit
+          path: _Build/host-capture-int8.json
+          if-no-files-found: error
+          retention-days: 30
   prototype:
     runs-on: ubuntu-24.04
     timeout-minutes: 15

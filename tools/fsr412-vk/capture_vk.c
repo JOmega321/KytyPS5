@@ -75,7 +75,10 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceProperties2(VkPhysicalDevice d,VkP
         LOG("{\"op\":\"property_query\",\"type\":%u}\n",s->sType);
         switch(s->sType) {
         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES: {
-            VkPhysicalDeviceIDProperties *v=(void*)s;memset(v->deviceUUID,1,VK_UUID_SIZE);memset(v->driverUUID,2,VK_UUID_SIZE);break;}
+            VkPhysicalDeviceIDProperties *v=(void*)s;memset(v->deviceUUID,1,VK_UUID_SIZE);memset(v->driverUUID,2,VK_UUID_SIZE);
+            // The Windows provider refuses a device without a valid Windows LUID before
+            // asking for any shader features. This identity is explicitly SYNTHETIC.
+            memset(v->deviceLUID,3,VK_LUID_SIZE);v->deviceLUIDValid=1;v->deviceNodeMask=1;break;}
         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES: {
             VkPhysicalDeviceDriverProperties *v=(void*)s;v->driverID=VK_DRIVER_ID_MESA_RADV;strcpy(v->driverName,"synthetic offline recorder");break;}
         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES: {
@@ -204,7 +207,10 @@ VKAPI_ATTR void VKAPI_CALL vkCmdDispatch(VkCommandBuffer c,uint32_t x,uint32_t y
             LOG(",\"buffer\":%"PRIu64",\"offset\":%"PRIu64",\"range\":%"PRIu64,ID(o->buffer.buffer),(uint64_t)o->buffer.offset,(uint64_t)o->buffer.range);
             uint64_t remaining=OBJ(o->buffer.buffer).size-o->buffer.offset;
             if(o->usage==VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER || remaining<=1024*1024) {char name[80];dump(ID(o->buffer.buffer),o->buffer.offset,o->buffer.range,name,sizeof(name));LOG(",\"data\":\"%s\"",name);}
-        } else if(o->usage==VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER || o->usage==VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER)LOG(",\"view\":%"PRIu64,o->resource);
+        } else if(o->usage==VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER || o->usage==VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER) {
+            Object *v=&objects[checked(o->resource)];LOG(",\"view\":%"PRIu64,o->resource);
+            if(objects[checked(v->resource)].size<=1024*1024) {char name[80];dump(v->resource,v->offset,v->size,name,sizeof(name));LOG(",\"data\":\"%s\"",name);}
+        }
         else LOG(",\"view\":%"PRIu64",\"sampler\":%"PRIu64",\"layout\":%u",ID(o->image.imageView),ID(o->image.sampler),o->image.imageLayout);
         LOG("}");
     }LOG("]}\n");

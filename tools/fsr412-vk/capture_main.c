@@ -36,7 +36,7 @@ int main(int argc,char **argv) {
     uint64_t count=32,ids[32]={0};const char *names[32]={0};
     struct ffxQueryDescGetVersions versions={.header={FFX_API_QUERY_DESC_TYPE_GET_VERSIONS,NULL},.createDescType=FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE,.device=&device,.outputCount=&count,.versionIds=ids,.versionNames=names};
     uint32_t rc=query(NULL,&versions.header);printf("query=%u count=%llu\n",rc,(unsigned long long)count);if(rc || count>32)return 1;
-    uint64_t chosen=0;for(uint64_t i=0;i<count;i++){printf("provider %016llx %s\n",(unsigned long long)ids[i],names[i]?names[i]:"?");if(names[i] && (strstr(names[i],"4.1.2") || strstr(names[i],"FSR4")))chosen=ids[i];}
+    uint64_t chosen=0;for(uint64_t i=0;i<count;i++){printf("provider %016llx %s\n",(unsigned long long)ids[i],names[i]?names[i]:"?");if(!chosen && names[i] && (strstr(names[i],"4.1.2") || strstr(names[i],"FSR4")))chosen=ids[i];}
     if(!chosen){fprintf(stderr,"No FSR4 provider; refusing FSR3 fallback\n");return 1;}
     struct ffxCreateContextDescUpscaleVersion version={.header={FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE_VERSION,NULL},.version=FFX_UPSCALER_VERSION};
     struct ffxCreateBackendVKDesc backend={.header={FFX_API_CREATE_CONTEXT_DESC_TYPE_BACKEND_VK,&version.header},.deviceContext=device};
