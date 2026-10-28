@@ -68,6 +68,7 @@ Gpu CreateGpu() {
     debug.messageType=VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT|VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT|VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;debug.pfnUserCallback=Debug;
     const char *layer="VK_LAYER_KHRONOS_validation",*extension=VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
     const bool validate=std::getenv("FSR412_VALIDATE") && !std::strcmp(std::getenv("FSR412_VALIDATE"),"1");
+    std::printf("Khronos validation: %s\n",validate?"enabled":"not requested");
     if(validate){ici.pNext=&debug;ici.enabledLayerCount=1;ici.ppEnabledLayerNames=&layer;ici.enabledExtensionCount=1;ici.ppEnabledExtensionNames=&extension;}
     CHECK(vkCreateInstance(&ici, nullptr, &gpu.instance));
     if(validate) {

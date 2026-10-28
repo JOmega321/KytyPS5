@@ -727,7 +727,7 @@ struct Upscaler::Impl {
             mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
             vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                                  0, 1, &mb, 0, nullptr, 0, nullptr);
-            std::printf("FSR 4.1.1: cleared recurrent buffers on reset (scene change)\n");
+            std::printf("FSR replay: cleared recurrent buffers on reset (scene change)\n");
         }
 
         const uint32_t aw = (ow + 7) & ~7u, ah = (oh + 7) & ~7u;

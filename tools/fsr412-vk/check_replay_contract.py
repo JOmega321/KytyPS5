@@ -59,11 +59,16 @@ def check(audit,rw,rh,ow,oh):
                 want=[bits(x) for x in floats]+[ow,oh,int(number==0),rw,rh,bits(1),bits(0 if number==0 else 1),1,bits(0.5),0]
                 if constants.get('MLSR_Optimized_Constants') != want:
                     raise ValueError(f'frame {number} {name}: MLSR constants differ from native replay')
-            elif name.startswith('pass'):
+            elif name.startswith('pass') and 'CsTensorSizes' in constants:
                 shifts=[1,0,1,1,2,2,2,3,3,3,2,2,1,1,0,0,0]
                 want=[v for shift in shifts for v in [((ow+7)&~7)>>shift,((oh+7)&~7)>>shift,0,0]]
                 if constants.get('CsTensorSizes') != want:
                     raise ValueError(f'frame {number} {name}: tensor size constants differ')
+            elif name.startswith('pass'):
+                # Some model kernels bake their tier-specific dimensions and declare
+                # no constant buffer. The native replay binds only reflected resources.
+                if constants:
+                    raise ValueError(f'frame {number} {name}: unexpected model constants')
             elif name=='spd':
                 want=[min(12,int(math.log2(max(rw,rh)))),((rw+63)//64)*((rh+63)//64),0,0,bits(1/rw),bits(1/rh),bits(1),0]
                 if constants.get('AutoExposureSPDConstants') != want:

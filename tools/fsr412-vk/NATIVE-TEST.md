@@ -50,9 +50,8 @@ software execution is not evidence of Radeon speed or compatibility.
   RGB values and neural arithmetic are preserved. Adaptations are recorded in
   `asset-provenance.json`; this is not proof of full image equivalence.
 - The native test uses Kyty's existing FSR 4.1.1 replay host implementation with
-  recovered 4.1.2 assets to investigate compatibility. A reset message mentioning
-  `FSR 4.1.1` comes from that shared host code. The shader and weight hashes in
-  the provenance identify what actually ran.
+  recovered 4.1.2 assets to investigate compatibility. The shader and weight
+  hashes in the provenance identify what actually ran.
 
 ## Source
 

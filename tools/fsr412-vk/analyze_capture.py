@@ -61,6 +61,8 @@ def analyze(root, dll):
                 raise ValueError('duplicate descriptor binding')
             for binding in pipeline['reflection']['bindings']:
                 observed = bindings.get((binding['set'], binding['binding']))
+                if binding['name'] in ('CsTensorSizes', 'MLSR_Optimized_Constants', 'AutoExposureSPDConstants', 'cbRCAS') and (not observed or 'data' not in observed):
+                    raise ValueError(f"constant buffer was not captured: {binding['name']}")
                 # Uniforms describe host decisions, not model weights. Preserve exact bits
                 # for checking a proposed native replay against the provider's CPU code.
                 if observed and observed['type'] == 6 and 'data' in observed:
