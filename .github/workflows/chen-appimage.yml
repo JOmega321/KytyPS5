@@ -130,7 +130,7 @@ jobs:
           # Hide development tools and host Python; exercise the bundled helpers after relocation.
           mkdir -p "$RUNNER_TEMP/kyty-base-tools"
           for command in bash cat chmod cp dirname env install ln mkdir mktemp mv readlink realpath rm touch true; do
-            ln -s "$(command -v "$command")" "$RUNNER_TEMP/kyty-base-tools/$command"
+            ln -s "$(type -P "$command")" "$RUNNER_TEMP/kyty-base-tools/$command"
           done
           PATH="$RUNNER_TEMP/kyty-base-tools" ./squashfs-root/AppRun --fsr411-tools-check > bundled-tools-check.log 2>&1
           grep -q 'Bundled translator and SPIR-V round trip: OK' bundled-tools-check.log
