@@ -22,44 +22,49 @@
 
 #include "graphics/host_gpu/graphicContext.h"
 #include "local/vulkan-recording.h"
-#define vkCmdUpdateBuffer LocalVulkanRecording::DirectDispatch().vkCmdUpdateBuffer
-#define vkAllocateMemory LocalVulkanRecording::DirectDispatch().vkAllocateMemory
-#define vkBindBufferMemory LocalVulkanRecording::DirectDispatch().vkBindBufferMemory
-#define vkBindImageMemory LocalVulkanRecording::DirectDispatch().vkBindImageMemory
-#define vkCmdBindPipeline LocalVulkanRecording::DirectDispatch().vkCmdBindPipeline
-#define vkCmdClearColorImage LocalVulkanRecording::DirectDispatch().vkCmdClearColorImage
-#define vkCmdCopyBuffer LocalVulkanRecording::DirectDispatch().vkCmdCopyBuffer
-#define vkCmdDispatch LocalVulkanRecording::DirectDispatch().vkCmdDispatch
-#define vkCmdFillBuffer LocalVulkanRecording::DirectDispatch().vkCmdFillBuffer
-#define vkCmdPipelineBarrier LocalVulkanRecording::DirectDispatch().vkCmdPipelineBarrier
-#define vkCmdResetQueryPool LocalVulkanRecording::DirectDispatch().vkCmdResetQueryPool
-#define vkCmdWriteTimestamp LocalVulkanRecording::DirectDispatch().vkCmdWriteTimestamp
-#define vkCreateBuffer LocalVulkanRecording::DirectDispatch().vkCreateBuffer
-#define vkCreateComputePipelines LocalVulkanRecording::DirectDispatch().vkCreateComputePipelines
-#define vkCreateDescriptorSetLayout LocalVulkanRecording::DirectDispatch().vkCreateDescriptorSetLayout
-#define vkCreateImage LocalVulkanRecording::DirectDispatch().vkCreateImage
-#define vkCreateImageView LocalVulkanRecording::DirectDispatch().vkCreateImageView
-#define vkCreatePipelineLayout LocalVulkanRecording::DirectDispatch().vkCreatePipelineLayout
-#define vkCreateQueryPool LocalVulkanRecording::DirectDispatch().vkCreateQueryPool
-#define vkCreateSampler LocalVulkanRecording::DirectDispatch().vkCreateSampler
-#define vkCreateShaderModule LocalVulkanRecording::DirectDispatch().vkCreateShaderModule
-#define vkDestroyBuffer LocalVulkanRecording::DirectDispatch().vkDestroyBuffer
-#define vkDestroyDescriptorSetLayout LocalVulkanRecording::DirectDispatch().vkDestroyDescriptorSetLayout
-#define vkDestroyImage LocalVulkanRecording::DirectDispatch().vkDestroyImage
-#define vkDestroyImageView LocalVulkanRecording::DirectDispatch().vkDestroyImageView
-#define vkDestroyPipeline LocalVulkanRecording::DirectDispatch().vkDestroyPipeline
-#define vkDestroyPipelineLayout LocalVulkanRecording::DirectDispatch().vkDestroyPipelineLayout
-#define vkDestroyQueryPool LocalVulkanRecording::DirectDispatch().vkDestroyQueryPool
-#define vkDestroySampler LocalVulkanRecording::DirectDispatch().vkDestroySampler
-#define vkDestroyShaderModule LocalVulkanRecording::DirectDispatch().vkDestroyShaderModule
-#define vkFreeMemory LocalVulkanRecording::DirectDispatch().vkFreeMemory
-#define vkGetBufferMemoryRequirements LocalVulkanRecording::DirectDispatch().vkGetBufferMemoryRequirements
-#define vkGetDeviceProcAddr LocalVulkanRecording::DirectDispatch().vkGetDeviceProcAddr
-#define vkGetImageMemoryRequirements LocalVulkanRecording::DirectDispatch().vkGetImageMemoryRequirements
-#define vkGetPhysicalDeviceMemoryProperties LocalVulkanRecording::DirectDispatch().vkGetPhysicalDeviceMemoryProperties
-#define vkGetPhysicalDeviceProperties LocalVulkanRecording::DirectDispatch().vkGetPhysicalDeviceProperties
-#define vkGetQueryPoolResults LocalVulkanRecording::DirectDispatch().vkGetQueryPoolResults
-#define vkMapMemory LocalVulkanRecording::DirectDispatch().vkMapMemory
+#if defined(KYTY_LOCAL_VULKAN_RECORDING)
+#define KYTY_FSR_DISPATCH LocalVulkanRecording::DirectDispatch()
+#else
+#define KYTY_FSR_DISPATCH VULKAN_HPP_DEFAULT_DISPATCHER
+#endif
+#define vkCmdUpdateBuffer KYTY_FSR_DISPATCH.vkCmdUpdateBuffer
+#define vkAllocateMemory KYTY_FSR_DISPATCH.vkAllocateMemory
+#define vkBindBufferMemory KYTY_FSR_DISPATCH.vkBindBufferMemory
+#define vkBindImageMemory KYTY_FSR_DISPATCH.vkBindImageMemory
+#define vkCmdBindPipeline KYTY_FSR_DISPATCH.vkCmdBindPipeline
+#define vkCmdClearColorImage KYTY_FSR_DISPATCH.vkCmdClearColorImage
+#define vkCmdCopyBuffer KYTY_FSR_DISPATCH.vkCmdCopyBuffer
+#define vkCmdDispatch KYTY_FSR_DISPATCH.vkCmdDispatch
+#define vkCmdFillBuffer KYTY_FSR_DISPATCH.vkCmdFillBuffer
+#define vkCmdPipelineBarrier KYTY_FSR_DISPATCH.vkCmdPipelineBarrier
+#define vkCmdResetQueryPool KYTY_FSR_DISPATCH.vkCmdResetQueryPool
+#define vkCmdWriteTimestamp KYTY_FSR_DISPATCH.vkCmdWriteTimestamp
+#define vkCreateBuffer KYTY_FSR_DISPATCH.vkCreateBuffer
+#define vkCreateComputePipelines KYTY_FSR_DISPATCH.vkCreateComputePipelines
+#define vkCreateDescriptorSetLayout KYTY_FSR_DISPATCH.vkCreateDescriptorSetLayout
+#define vkCreateImage KYTY_FSR_DISPATCH.vkCreateImage
+#define vkCreateImageView KYTY_FSR_DISPATCH.vkCreateImageView
+#define vkCreatePipelineLayout KYTY_FSR_DISPATCH.vkCreatePipelineLayout
+#define vkCreateQueryPool KYTY_FSR_DISPATCH.vkCreateQueryPool
+#define vkCreateSampler KYTY_FSR_DISPATCH.vkCreateSampler
+#define vkCreateShaderModule KYTY_FSR_DISPATCH.vkCreateShaderModule
+#define vkDestroyBuffer KYTY_FSR_DISPATCH.vkDestroyBuffer
+#define vkDestroyDescriptorSetLayout KYTY_FSR_DISPATCH.vkDestroyDescriptorSetLayout
+#define vkDestroyImage KYTY_FSR_DISPATCH.vkDestroyImage
+#define vkDestroyImageView KYTY_FSR_DISPATCH.vkDestroyImageView
+#define vkDestroyPipeline KYTY_FSR_DISPATCH.vkDestroyPipeline
+#define vkDestroyPipelineLayout KYTY_FSR_DISPATCH.vkDestroyPipelineLayout
+#define vkDestroyQueryPool KYTY_FSR_DISPATCH.vkDestroyQueryPool
+#define vkDestroySampler KYTY_FSR_DISPATCH.vkDestroySampler
+#define vkDestroyShaderModule KYTY_FSR_DISPATCH.vkDestroyShaderModule
+#define vkFreeMemory KYTY_FSR_DISPATCH.vkFreeMemory
+#define vkGetBufferMemoryRequirements KYTY_FSR_DISPATCH.vkGetBufferMemoryRequirements
+#define vkGetDeviceProcAddr KYTY_FSR_DISPATCH.vkGetDeviceProcAddr
+#define vkGetImageMemoryRequirements KYTY_FSR_DISPATCH.vkGetImageMemoryRequirements
+#define vkGetPhysicalDeviceMemoryProperties KYTY_FSR_DISPATCH.vkGetPhysicalDeviceMemoryProperties
+#define vkGetPhysicalDeviceProperties KYTY_FSR_DISPATCH.vkGetPhysicalDeviceProperties
+#define vkGetQueryPoolResults KYTY_FSR_DISPATCH.vkGetQueryPoolResults
+#define vkMapMemory KYTY_FSR_DISPATCH.vkMapMemory
 
 namespace Fsr411 {
 

@@ -78,7 +78,9 @@ jobs:
           chmod 700 "$XDG_RUNTIME_DIR"
           unset LD_LIBRARY_PATH QT_PLUGIN_PATH QT_QPA_PLATFORM_PLUGIN_PATH
           APPIMAGE_EXTRACT_AND_RUN=1 "$image" --emulator --help > _Build/final-help.log
+          printf '%s\n' '{"upscaler":"fsr4"}' > "$XDG_DATA_HOME/KytyPS5-chenxiao07/launcher-settings.json"
           APPIMAGE_EXTRACT_AND_RUN=1 "$image" --dry-run > _Build/final-launch.log
+          grep -q "KYTY_UPSCALER='fsr4'" _Build/final-launch.log
           APPIMAGE_EXTRACT_AND_RUN=1 SDL_VIDEODRIVER=x11 xvfb-run -a "$image" --screenshot "$PWD/_Build/screenshots" > _Build/final-gui.log 2>&1
           test "$(find _Build/screenshots -name '*.bmp' | wc -l)" -ge 7
           cd _Build
