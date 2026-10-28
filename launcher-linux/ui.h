@@ -87,7 +87,7 @@ private:
 	void Play();
 	void StartInTerminal(const Launch& launch);
 	void Message(const std::string& text);
-	void PickFolder(bool zar);
+	void PickFolder(bool zar, bool cache = false);
 	void OpenCheats();
 
 	// The Graphics page's rules (launcher-windows MainWindow: SelectRenderHeight,
@@ -148,6 +148,7 @@ private:
 	std::string                       message_;
 	bool                              message_open_ = false;
 	std::shared_ptr<Job<std::string>> picker_job_;
+	bool        picker_cache_ = false;
 	bool        browser_open_ = false; // the built-in folder browser (no zenity or kdialog)
 	bool        browser_zar_  = false;
 	std::string browser_path_;

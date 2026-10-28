@@ -92,9 +92,9 @@ GameInfo GameInfo::Read(const std::string& path, const fs::path& tool, const fs:
 }
 
 StoreState CheckShaderStore(const fs::path& root, const fs::path& precompile_tool,
-                            const GameInfo& game) {
+                            const GameInfo& game, const fs::path& cache) {
 	if (!game.Found()) return StoreState::Unknown;
-	const auto store = root / "_PipelineCache" / "static";
+	const auto store = cache / "static";
 	bool       made  = false;
 	for (const char* ext: {".binaries", ".bin", ".blobs"})
 		made = made || Exists(store / (game.GameId() + ext));
@@ -111,7 +111,7 @@ StoreState CheckShaderStore(const fs::path& root, const fs::path& precompile_too
 	if (seeds.empty() || precompile_tool.empty()) return StoreState::Current;
 	std::string output;
 	const int   code = Platform::Run(
-        {precompile_tool.string(), "--game", game.path, "--seeds", seeds.string(), "--status"},
+        {"env", "KYTY_PIPELINE_CACHE_DIR=" + cache.string(), precompile_tool.string(), "--game", game.path, "--seeds", seeds.string(), "--status"},
         &output, 60000, root);
 	if (code != 0) return StoreState::Unknown;
 	if (output.find("static cache outdated") != std::string::npos) return StoreState::Outdated;

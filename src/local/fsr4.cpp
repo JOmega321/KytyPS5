@@ -2,13 +2,34 @@
 #include "graphics/host_gpu/graphicContext.h"
 #include "local/fsr411/fsr411.h"
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <string_view>
 
 namespace Libs::Graphics {
+namespace {
+std::atomic<int64_t> last_fsr4 {0};
+std::atomic<bool> fsr4_fallback {false};
+int64_t NowMs() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+}
+const char* Fsr4Watermark() {
+    const char* enabled = std::getenv("KYTY_FSR4_WATERMARK");
+    const char* selected = std::getenv("KYTY_UPSCALER");
+    if (!enabled || std::string_view(enabled) != "1" || !selected || std::string_view(selected) != "fsr4") return "";
+    if (fsr4_fallback.load()) return "FSR 3.1 fallback (FSR 4.1.1 unavailable)";
+    if (last_fsr4.load() && NowMs() - last_fsr4.load() < 2000)
+        return "FSR 4.1.1 INT8 | PS5 Pro path | experimental";
+    return "FSR 4.1.1 INT8 requested | awaiting upscale";
+}
+
 #if defined(__linux__)
 bool Fsr4Upscale(GraphicContext& graphics, vk::CommandBuffer command, const FrameGen::UpscaleInputs& in) {
     // Kept until process exit, like the FSR3 contexts. No teardown while GPU commands reference it.
@@ -16,6 +37,7 @@ bool Fsr4Upscale(GraphicContext& graphics, vk::CommandBuffer command, const Fram
     static auto* state = new State;
     std::lock_guard lock(state->mutex);
     const auto fail = [&](const std::string& reason) {
+        fsr4_fallback.store(true);
         if (state->error != reason) {
             std::printf("FSR 4.1.1 unavailable: %s; falling back to FSR 3\n", reason.c_str());
             state->error = reason;
@@ -74,6 +96,7 @@ bool Fsr4Upscale(GraphicContext& graphics, vk::CommandBuffer command, const Fram
     if (!ok) return fail(state->upscaler->Error());
     if (state->first || !state->error.empty())
         std::printf("Super resolution: FSR 4.1.1 experimental %s\n", state->upscaler->Describe().c_str());
+    last_fsr4.store(NowMs()); fsr4_fallback.store(false);
     state->first = false; state->error.clear();
     return true;
 }

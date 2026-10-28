@@ -10,6 +10,7 @@ Everything is read-only.  Nothing here touches the repo or the game directory ex
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import struct
 from pathlib import Path
@@ -17,7 +18,7 @@ from pathlib import Path
 import numpy as np
 
 REPO = Path(__file__).resolve().parents[3]
-CACHE_ROOT = REPO / '_PipelineCache' / 'warmup-v2'
+CACHE_ROOT = Path(os.environ.get('KYTY_PIPELINE_CACHE_DIR') or REPO / '_PipelineCache') / 'warmup-v2'
 OUT = REPO / '_Build' / 're' / 'agent-warm'
 
 NO_SHADER = 0xFFFFFFFF

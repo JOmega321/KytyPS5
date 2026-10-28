@@ -49,7 +49,12 @@ const nlohmann::ordered_json& Defaults() {
 		d["mangohud"]         = true; // run_ds.sh's MANGO=1 default
 		d["terminal"]         = "";
 		d["precompile_quick"] = false;
-		d["ui_scale"]         = 0; // percent; 0: automatic
+		d["fsr4_watermark"] = false;
+        d["shader_cache_dir"] = "";
+        d["shader_workers"] = 0;
+        d["shader_warmup_background"] = true;
+        d["precompile_jobs"] = 0;
+        d["ui_scale"]         = 0; // percent; 0: automatic
 		return d;
 	}();
 	return defaults;

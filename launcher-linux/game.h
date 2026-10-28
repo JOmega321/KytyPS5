@@ -32,7 +32,7 @@ enum class StoreState { Unknown, Checking, None, Current, Outdated };
 // The precompiled shaders of a game version (_PipelineCache/static/<title>_<version>.*), as the
 // precompile program's --status reports them; up to a minute.
 StoreState CheckShaderStore(const fs::path& root, const fs::path& precompile_tool,
-                            const GameInfo& game);
+                            const GameInfo& game, const fs::path& cache);
 
 // A GoldHEN-style mods file: every mod has a name, an "enabled" flag and the memory writes it
 // makes. The emulator honours the flag (src/loader/gamePatch.cpp), so choosing the mods only sets

@@ -1,3 +1,4 @@
+#include "local/pipeline-cache-path.h"
 #include "common/abi.h"
 #include "common/archive.h"
 #include "common/dateTime.h"
@@ -1588,7 +1589,7 @@ static int ReadHostFileToGuest(const std::string& host_path, uint64_t file_offse
 		(void)Loader::SystemContentParamSfoGetString("APP_VER", &version);
 		const auto root      = Common::PathToString(LibKernel::FileSystem::GetRealFilename("/app0"));
 		const auto id        = title + (version.empty() ? "" : "_" + version);
-		const auto recording = "_PipelineCache/files/" + id + ".files";
+		const auto recording = (LocalCache::PipelineRoot() / "files" / (id + ".files")).string();
 		// (The EU and Asian editions take the US one's: Libs::Graphics::DemonsSouls::ShippedTitle.)
 		auto            released = "tools/local/static-precompile/files-" + id + ".files";
 		std::error_code error;

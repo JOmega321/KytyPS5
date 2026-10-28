@@ -28,6 +28,7 @@
 #include "native-preparation-scratch.h"
 #include "native-resource-state.h"
 #include "shader-warmup-cache.h"
+#include "local/pipeline-cache-path.h"
 #include "scene-tags.h"
 #include "live-census.h"
 #include "live-counters.h"
@@ -899,7 +900,7 @@ struct PipelineCache::ProgramCache {
 	static constexpr auto PrefetchCacheSaveEvery = std::chrono::seconds(60);
 
 	static std::filesystem::path PrefetchCachePath(std::string_view suffix) {
-		return std::filesystem::path("_PipelineCache") / "static" / (PipelineCacheGameId() + std::string(suffix));
+		return LocalCache::PipelineRoot() / "static" / (PipelineCacheGameId() + std::string(suffix));
 	}
 
 	// What the translations are good for: the inputs' identity (the title, GPU and driver), this executable (its revision,
@@ -3213,7 +3214,7 @@ void PipelineCache::FinishCompileWorkers() {
 // The compiler inputs the static precompile compiled, as a warmup file: what the shader prefetch
 // translates (precompile-windows.ps1 writes it next to the static pipeline cache).
 static std::filesystem::path StaticInputsPath() {
-	return std::filesystem::path("_PipelineCache") / "static" / (PipelineCacheGameId() + ".shaders");
+	return LocalCache::PipelineRoot() / "static" / (PipelineCacheGameId() + ".shaders");
 }
 
 // Live "objects" (live-counters.h): container sizes read from the live thread (counts only, no iteration).
@@ -3269,7 +3270,7 @@ PipelineCache::PipelineCache(GraphicContext& graphics)
 	    (std::string_view(warmup) == "1" || std::string_view(warmup) == "record")) {
 		const auto device = ShaderInputDeviceSignature(m_graphics.GetPhysicalDeviceProperties());
 		const auto title = PipelineCacheTitleId();
-		const auto root = std::filesystem::path("_PipelineCache") / "warmup-v2";
+		const auto root = LocalCache::PipelineRoot() / "warmup-v2";
 		// (Its file is the game version's, its identity line the title's: PipelineCacheGameId.)
 		auto path = root / fmt::format("{:016x}", XXH3_64bits(device.data(), device.size())) / (PipelineCacheGameId() + ".shaders");
 		// KYTY_SHADER_WARMUP_FILE: another file (a fresh recording starts empty, nothing adopted).
@@ -3793,7 +3794,7 @@ static std::string StaticCacheSignature(const vk::PhysicalDeviceProperties& prop
 }
 
 static std::filesystem::path StaticCachePath() {
-	return std::filesystem::path("_PipelineCache") / "static" / (PipelineCacheGameId() + ".bin");
+	return LocalCache::PipelineRoot() / "static" / (PipelineCacheGameId() + ".bin");
 }
 
 // The translation features the static store's pipelines were made with (ShaderRecompiler::Frontend::TranslatorFeatures),
@@ -3802,7 +3803,7 @@ static std::filesystem::path StaticCachePath() {
 // merge of any precompile (--stamp: with recorded play lost, or -Quick, some pipelines stay as they were: another run
 // would not make them, so the store is not out of date for that). None (an older store): 0.
 static std::filesystem::path StaticFeaturesPath() {
-	return std::filesystem::path("_PipelineCache") / "static" / (PipelineCacheGameId() + ".features");
+	return LocalCache::PipelineRoot() / "static" / (PipelineCacheGameId() + ".features");
 }
 
 static std::pair<uint32_t, uint32_t> ReadStaticStamp() {
@@ -3859,7 +3860,7 @@ static std::optional<uint64_t> ReadStaticHintsStamp() {
 // Its pipelines as the driver's binaries (VK_KHR_pipeline_binary), read when needed: the driver keeps a
 // copy of a whole pipeline cache in memory. Headed by the GPU, the driver and its global pipeline key.
 static std::filesystem::path StaticBinariesPath() {
-	return std::filesystem::path("_PipelineCache") / "static" / (PipelineCacheGameId() + ".binaries");
+	return LocalCache::PipelineRoot() / "static" / (PipelineCacheGameId() + ".binaries");
 }
 
 static std::string StaticBinariesSignature(GraphicContext& graphics) {
@@ -3886,7 +3887,7 @@ static bool StaticBlobsEnabled() {
 }
 
 static std::filesystem::path StaticBlobsPath() {
-	return std::filesystem::path("_PipelineCache") / "static" / (PipelineCacheGameId() + ".blobs");
+	return LocalCache::PipelineRoot() / "static" / (PipelineCacheGameId() + ".blobs");
 }
 
 static std::string StaticBlobsSignature(const vk::PhysicalDeviceProperties& properties) {
@@ -4056,9 +4057,9 @@ void PipelineCache::InitializeDriverCache() {
 		return;
 	}
 
-	m_driver_cache_path     = std::filesystem::path("_PipelineCache") / (title_id + ".bin");
+	m_driver_cache_path     = LocalCache::PipelineRoot() / (title_id + ".bin");
 	if (!m_driver_cache_key.empty()) {
-		m_driver_cache_path = std::filesystem::path("_PipelineCache") / "local" /
+		m_driver_cache_path = LocalCache::PipelineRoot() / "local" /
 		                      m_driver_cache_key / (title_id + ".bin");
 	}
 	// The launcher keeps one cache across emulator builds: pipelines of changed shaders pile up in it, so past

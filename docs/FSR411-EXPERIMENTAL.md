@@ -67,3 +67,39 @@ with KytyPS5. Capture API headers retain AMD's MIT notices. Kyty modifications
 provide renderer/device integration, GPU-ordered constants, FSR 3 fallback,
 launcher selection, persistent asset paths and AppImage packaging. The upstream
 bbport-specific benchmark is not included or represented as a Kyty validation.
+
+## Launcher options (October 28 update)
+
+Graphics → FSR 4 status watermark adds an emulator text overlay. It reports
+FSR 4.1.1 INT8 only after a successful command recording; after two seconds without
+upscaling it says awaiting upscale. A failed backend attempt shows FSR 3.1 fallback.
+This is our status indicator, not AMD's DLL watermark or proof of correct GPU output.
+It works independently of the FPS overlay. Changes apply next game launch.
+
+FSR 4.1.1 INT8 selects `KYTY_UPSCALER=fsr4`. The same
+`DemonsSoulsSuperResolution::Install` used by FSR 3.1 installs the PS5 Pro
+constructor patch and display mode 5; the existing super-resolution renderer supplies
+the same scene, depth, motion and jitter inputs. The patch log names FSR4 explicitly.
+Unsupported game versions retain the game's TAA; this does not add a PS5 Pro patch
+to versions that lack it.
+
+Shaders → Shader cache folder accepts a writable directory, with a folder browser
+and a default reset. `KYTY_PIPELINE_CACHE_DIR` redirects the runtime pipeline cache,
+SPIR-V translations, static precompiled binaries, warmup records, and file-follow
+records. Precompile and the launcher's cache-status check use the same directory.
+Blank keeps the original `_PipelineCache` in persistent app data. Existing files
+are not migrated or deleted. Do not change folders while play/precompile is running.
+Driver-managed Mesa/NVIDIA caches are separate and retain their own locations.
+
+CPU controls on Shaders:
+
+- Background shader workers: Automatic (upstream policy), or 1/2/4/8/16 per pool.
+  Sets `KYTY_SHADER_PREFETCH_THREADS`, `KYTY_SHADER_FOLLOW_THREADS` and
+  `KYTY_SHADER_WARMUP_BACKGROUND_THREADS`. Try 1 on a busy Ryzen 5 5600X;
+  less CPU contention trades off against slower preparation and potential later stutter.
+- Warm up shaders during play: on by default. Off sets
+  `KYTY_SHADER_WARMUP_BACKGROUND=0`, doing warmup before play instead.
+- Precompile CPU jobs: Automatic or 1/2/4/8/16 processes, three threads per process,
+  via precompile-linux.sh `--jobs`. Applies to offline precompilation only.
+
+These expose existing emulator controls; no FPS gain is asserted without benchmarks.

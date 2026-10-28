@@ -31,6 +31,8 @@
 # seed file (seeds-<title>_<version>.seeds) is made when there is none, and made again when the program changed.
 cd "$(dirname "$(readlink -f "$0")")" || exit 1
 ROOT="$(pwd -P)"
+CACHE_ROOT="${KYTY_PIPELINE_CACHE_DIR:-$ROOT/_PipelineCache}"
+export KYTY_PIPELINE_CACHE_DIR="$CACHE_ROOT"
 
 GAME="${KYTY_GAME:-}"
 SEEDS=''
@@ -72,7 +74,7 @@ fi
 # Named like the emulator: drivers key per-application caches and profiles by the executable's name, and what
 # kyty_shader_precompile compiled the emulator then did not find (precompile-windows.ps1: AMD on Windows). A hard link in
 # _PipelineCache (a copy where the file system has none).
-RUN_AS="$ROOT/_PipelineCache/precompile-as-emulator"
+RUN_AS="$CACHE_ROOT/precompile-as-emulator"
 mkdir -p "$RUN_AS"
 rm -f "$RUN_AS/kyty_emulator"
 ln "$EXE" "$RUN_AS/kyty_emulator" 2>/dev/null || cp "$EXE" "$RUN_AS/kyty_emulator" || die "cannot place $RUN_AS/kyty_emulator"
@@ -128,7 +130,7 @@ if [ ! -f "$SEEDS" ] || [ "$REMAKE" = 1 ]; then
 fi
 
 shopt -s nullglob
-RECORDINGS=("$ROOT"/_PipelineCache/warmup-v2/*/"$ID".shaders)
+RECORDINGS=("$CACHE_ROOT"/warmup-v2/*/"$ID".shaders)
 if [ "$MODE" = hints ]; then
 	[ ${#RECORDINGS[@]} -gt 0 ] || die "no recorded play of $ID in _PipelineCache/warmup-v2 (play first, with the shader warmup on)"
 	out="$ROOT/my-hints-$ID.hints"
@@ -411,7 +413,7 @@ merge_arguments=(--merge --stamp)
 [ "$MODE" != quick ] && [ "$RECORDED_LOST" = 0 ] && merge_arguments+=(--prune)
 run_precompile merge merge "${merge_arguments[@]}"
 [ "$MODE" = quick ] && run_precompile inputs inputs "${INPUTS[@]}"
-cache="$(ls -t "$ROOT/_PipelineCache/static/$ID".{bin,binaries,blobs} 2>/dev/null | head -1)"
+cache="$(ls -t "$CACHE_ROOT/static/$ID".{bin,binaries,blobs} 2>/dev/null | head -1)"
 if [ -n "$cache" ]; then
 	echo "done in $(elapsed): $cache ($(( $(stat -c %s "$cache") / 1048576 )) MB; $SPLIT shards split)"
 	if [ -f "$STUCK_LIST" ]; then

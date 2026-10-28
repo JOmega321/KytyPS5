@@ -1040,7 +1040,7 @@ void LauncherWindow::GraphicsPage() {
 	upscalers.emplace_back("fsr");
 	upscaler_labels.emplace_back(T("upscaler.fsr"));
 	upscalers.emplace_back("fsr4");
-	upscaler_labels.emplace_back("FSR 4.1.1 (experimental, INT8)");
+	upscaler_labels.emplace_back("FSR 4.1.1 INT8 (PS5 Pro path, experimental)");
 	// (No upscaler and no anti-aliasing: Commands' KYTY_GAME_CONVARS, issue #220.)
 	upscalers.emplace_back("off");
 	upscaler_labels.emplace_back(T("upscaler.off"));
@@ -1049,7 +1049,7 @@ void LauncherWindow::GraphicsPage() {
 	if (chosen == "fsr")
 		note = T("upscaler.fsrNote");
 	else if (chosen == "fsr4")
-		note = "Experimental INT8 replay; generate FSR 4.1.1 assets first. Missing features/assets fall back to FSR 3.";
+		note = "Replaces Sony's upscaler through the same PS5 Pro patch as FSR 3.1. Experimental INT8 replay; generate FSR 4.1.1 assets first. Missing features/assets fall back to FSR 3.";
 	else if (chosen == "off")
 		note = T("upscaler.offNote");
 	else
@@ -1069,6 +1069,9 @@ void LauncherWindow::GraphicsPage() {
 		    }
 	    },
 	    note);
+
+    Row("fsr4.watermark", [&] { SettingSwitch("##fsr4watermark", "fsr4_watermark", S().Str("upscaler") == "fsr4"); },
+        "Emulator status watermark: FSR 4.1.1 INT8 active, awaiting upscale, or FSR 3.1 fallback. Applies next launch.");
 
 	const auto allowed  = AllowedRenderHeights();
 	const int  selected = SelectedRender();
@@ -1281,6 +1284,34 @@ void LauncherWindow::GamePage() {
 
 void LauncherWindow::ShadersPage() {
 	PageTitle("shaders.title");
+    Row("cache.folder", [&] {
+        std::string path = S().Str("shader_cache_dir");
+        ImGui::SetNextItemWidth(-1);
+        if (ImGui::InputTextWithHint("##cachepath", "Default: _PipelineCache in app data", &path)) {
+            S().Set("shader_cache_dir", path); Changed(); store_checked_ = {};
+        }
+        if (FlatButton("Browse cache folder...")) PickFolder(false, true);
+        ImGui::SameLine();
+        if (FlatButton("Use default")) { S().Set("shader_cache_dir", ""); Changed(); store_checked_ = {}; }
+    }, "Shared by gameplay and precompilation on next launch. Existing caches stay in their original folder; move them yourself if needed. Use an absolute writable folder on an SSD.");
+    Row("cpu.workers", [&] {
+        const std::vector<int> values {0, 1, 2, 4, 8, 16};
+        int index = 0;
+        for (size_t i = 0; i < values.size(); ++i) if (values[i] == S().Int("shader_workers")) index = i;
+        if (Combo("##shaderworkers", &index, {"Automatic", "1", "2", "4", "8", "16"}, 220)) {
+            S().Set("shader_workers", values[index]); Changed();
+        }
+    }, "Workers per shader prefetch, follow and background warmup pool. Try 1 on a busy 6-core CPU to reduce competition with gameplay; preparation takes longer. Automatic uses upstream defaults.");
+    Row("cpu.warmup", [&] { SettingSwitch("##warmupbg", "shader_warmup_background"); },
+        "On: prepare shaders alongside play. Off: prepare before play, reducing background CPU contention but increasing startup time.");
+    Row("cpu.jobs", [&] {
+        const std::vector<int> values {0, 1, 2, 4, 8, 16};
+        int index = 0;
+        for (size_t i = 0; i < values.size(); ++i) if (values[i] == S().Int("precompile_jobs")) index = i;
+        if (Combo("##precompilejobs", &index, {"Automatic", "1", "2", "4", "8", "16"}, 220)) {
+            S().Set("precompile_jobs", values[index]); Changed();
+        }
+    }, "Concurrent offline precompile processes (3 threads each). Lower this to leave CPU capacity for other applications; this does not change gameplay thread counts.");
 	const char* state = nullptr;
 	switch (store_) {
 		case StoreState::Checking: state = "shaders.checking"; break;
@@ -1672,8 +1703,8 @@ void LauncherWindow::CheckStore(bool force) {
 	if (store_job_ == nullptr && store_ == StoreState::Unknown) store_ = StoreState::Checking;
 	auto job   = std::make_shared<Job<StoreState>>();
 	store_job_ = job;
-	std::thread([job, root = context_.root, tool = context_.precompile_tool, game = game_] {
-		job->value = CheckShaderStore(root, tool, game);
+	std::thread([job, root = context_.root, tool = context_.precompile_tool, game = game_, cache = fs::absolute(context_.root / (S().Str("shader_cache_dir").empty() ? "_PipelineCache" : S().Str("shader_cache_dir")))] {
+		job->value = CheckShaderStore(root, tool, game, cache);
 		job->done  = true;
 		Wake();
 	}).detach();
@@ -1705,8 +1736,9 @@ void LauncherWindow::Poll() {
 		const auto chosen = Trim(picker_job_->value);
 		picker_job_       = nullptr;
 		if (!chosen.empty()) {
-			game_text_ = chosen;
-			LoadGame(chosen);
+			if (picker_cache_) {
+                S().Set("shader_cache_dir", chosen); Changed(); CheckStore(true);
+            } else { game_text_ = chosen; LoadGame(chosen); }
 		}
 	}
 	// (DLSS's runtime appears while the window is open: get-dlss-linux.sh ran in its terminal.)
@@ -1721,9 +1753,10 @@ void LauncherWindow::Poll() {
 
 // The desktop's own dialog (kdialog on KDE, zenity or qarma elsewhere), off the window's thread;
 // the built-in browser without one.
-void LauncherWindow::PickFolder(bool zar) {
+void LauncherWindow::PickFolder(bool zar, bool cache) {
 	if (picker_job_ != nullptr) return;
-	const auto      current = Trim(game_text_);
+	picker_cache_ = cache;
+	const auto current = cache ? S().Str("shader_cache_dir") : Trim(game_text_);
 	std::error_code error;
 	fs::path        start = current.empty() ? fs::path() : fs::path(current);
 	if (!start.empty() && !fs::is_directory(start, error)) start = start.parent_path();
@@ -1735,7 +1768,7 @@ void LauncherWindow::PickFolder(bool zar) {
 	if (const char* value = std::getenv("XDG_CURRENT_DESKTOP"); value != nullptr)
 		desktop = Lower(value);
 	const bool               kde   = desktop.find("kde") != std::string::npos;
-	const auto               title = std::string(T(zar ? "dialog.zar" : "dialog.game"));
+	const auto               title = std::string(cache ? "Shader cache folder" : T(zar ? "dialog.zar" : "dialog.game"));
 	std::vector<std::string> argv;
 	auto                     zenity = [&](const std::string& program) {
         argv = {program, "--file-selection", "--title=" + title,
@@ -1952,8 +1985,12 @@ void LauncherWindow::Modals() {
 		ImGui::BeginDisabled(!can_choose);
 		if (ImGui::Button(T(browser_zar_ ? "picker.open" : "picker.choose"),
 		                  {200.0f * scale_, 0})) {
-			game_text_ = browser_zar_ ? browser_selected_ : dir.string();
-			LoadGame(game_text_);
+			if (picker_cache_) {
+                S().Set("shader_cache_dir", dir.string()); Changed(); CheckStore(true);
+            } else {
+                game_text_ = browser_zar_ ? browser_selected_ : dir.string();
+                LoadGame(game_text_);
+            }
 			ImGui::CloseCurrentPopup();
 		}
 		ImGui::EndDisabled();

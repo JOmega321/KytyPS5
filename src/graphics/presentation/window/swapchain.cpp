@@ -25,6 +25,7 @@
 #include "live-counters.h"
 #include "local-platform.h"
 #include "perf-overlay.h"
+#include "local/fsr4.h"
 #if defined(_WIN32)
 #include "SDL_syswm.h"
 #endif
@@ -520,6 +521,10 @@ struct Presenter::Impl {
 		const auto now   = std::chrono::steady_clock::now();
 		UpdateStatus(now);
 		hud.notice = Loader::DemonsSoulsWarp::HudText();
+        if (const char* watermark = Fsr4Watermark(); *watermark) {
+            if (!hud.notice.empty()) hud.notice += "\n";
+            hud.notice += watermark;
+        }
 		if (level < 2) {
 			// (Switched down from detailed with F8: its rows go.)
 			hud.perf.rows.clear();

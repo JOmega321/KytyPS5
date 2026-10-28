@@ -21,6 +21,7 @@ import argparse
 import array
 import collections
 import json
+import os
 import re
 import struct
 import sys
@@ -143,7 +144,7 @@ def recorded_file(path=None, game=GAME):
     if path:
         return Path(path)
     name = f'{game_id(game)}.shaders'
-    files = sorted((REPO / '_PipelineCache' / 'warmup-v2').glob(f'*/{name}'), key=lambda p: p.stat().st_mtime)
+    files = sorted((Path(os.environ.get('KYTY_PIPELINE_CACHE_DIR') or REPO / '_PipelineCache') / 'warmup-v2').glob(f'*/{name}'), key=lambda p: p.stat().st_mtime)
     if not files:
         sys.exit(f'no recorded warmup cache {name} under _PipelineCache/warmup-v2')
     return files[-1]

@@ -32,6 +32,12 @@ const std::vector<std::string>& GameVariables() {
 	                                             "KYTY_FRAMEGEN",
 	                                             "KYTY_FRAMEGEN_BACKEND",
 	                                             "KYTY_UPSCALER",
+                                                 "KYTY_FSR4_WATERMARK",
+                                                 "KYTY_PIPELINE_CACHE_DIR",
+                                                 "KYTY_SHADER_PREFETCH_THREADS",
+                                                 "KYTY_SHADER_FOLLOW_THREADS",
+                                                 "KYTY_SHADER_WARMUP_BACKGROUND_THREADS",
+                                                 "KYTY_SHADER_WARMUP_BACKGROUND",
 	                                             "KYTY_HD_OUTPUT",
 	                                             "KYTY_OUTPUT_HEIGHT",
 	                                             "KYTY_GPU",
@@ -272,7 +278,16 @@ Launch Commands::Play(const GameInfo& game, bool direct) const {
 		Put(set, "KYTY_UPSCALER", "dlss");
 	else if (FsrUpscaler())
 		Put(set, "KYTY_UPSCALER", S().Str("upscaler"));
-	// (With DLSS too: its PS5 Pro path then makes the 1080p output, the 3D at most 1080 high.)
+	if (S().Str("upscaler") == "fsr4")
+        Put(set, "KYTY_FSR4_WATERMARK", S().Bool("fsr4_watermark") ? "1" : "0");
+    if (!S().Str("shader_cache_dir").empty())
+        Put(set, "KYTY_PIPELINE_CACHE_DIR", fs::absolute(context_.root / S().Str("shader_cache_dir")).lexically_normal().string());
+    if (const int workers = S().Int("shader_workers"); workers >= 1 && workers <= 16) {
+        for (const char* key : {"KYTY_SHADER_PREFETCH_THREADS", "KYTY_SHADER_FOLLOW_THREADS", "KYTY_SHADER_WARMUP_BACKGROUND_THREADS"})
+            Put(set, key, std::to_string(workers));
+    }
+    Put(set, "KYTY_SHADER_WARMUP_BACKGROUND", S().Bool("shader_warmup_background") ? "1" : "0");
+    // (With DLSS too: its PS5 Pro path then makes the 1080p output, the 3D at most 1080 high.)
 	if (HdOutput())
 		Put(set, "KYTY_HD_OUTPUT", "1");
 	else if (Output1440())
@@ -339,6 +354,11 @@ Launch Commands::Precompile(const std::string& mode) const {
 	launch.directory = context_.root;
 	launch.pause     = Launch::Pause::Always;
 	launch.argv      = {context_.precompile_script.string()};
+    if (!S().Str("shader_cache_dir").empty())
+        launch.set.emplace_back("KYTY_PIPELINE_CACHE_DIR", fs::absolute(context_.root / S().Str("shader_cache_dir")).lexically_normal().string());
+    else launch.unset.emplace_back("KYTY_PIPELINE_CACHE_DIR");
+    if (const int jobs = S().Int("precompile_jobs"); jobs >= 1 && jobs <= 16)
+        launch.argv.insert(launch.argv.end(), {"--jobs", std::to_string(jobs)});
 	if (!S().Str("game").empty())
 		launch.argv.insert(launch.argv.end(), {"--game", S().Str("game")});
 	if (!mode.empty())
