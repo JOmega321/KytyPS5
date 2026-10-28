@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: recursive
       - name: Dependencies
@@ -28,6 +28,28 @@ jobs:
           cmake --build _Build/appimage --target kyty_emulator kyty_launcher kyty_shader_precompile --parallel 4
           _Build/appimage/kyty_emulator --help > _Build/native-help.log
           _Build/appimage/kyty_launcher --help >> _Build/native-help.log
+      - name: Preserve native build before packaging
+        run: |
+          git rev-parse HEAD > _Build/appimage/native-source.txt
+          git submodule status --recursive > _Build/appimage/native-dependencies.txt
+          clang --version > _Build/appimage/native-toolchain.txt
+          ldd --version >> _Build/appimage/native-toolchain.txt
+          dpkg-query -W >> _Build/appimage/native-toolchain.txt
+          find _Build/appimage/externals -name '*.zip' -exec sha256sum {} + > _Build/appimage/native-downloads.sha256
+          tar -C _Build/appimage -czf _Build/native-binaries.tar.gz \
+            kyty_emulator kyty_launcher kyty_shader_precompile CMakeCache.txt kytyGitVersion.h \
+            native-source.txt native-dependencies.txt native-toolchain.txt native-downloads.sha256
+          cd _Build
+          sha256sum native-binaries.tar.gz > native-binaries.tar.gz.sha256
+      - name: Upload native build
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: chenxiao07-native-x86_64
+          path: |
+            _Build/native-binaries.tar.gz
+            _Build/native-binaries.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 7
       - name: Assemble AppDir
         run: |
           python3 packaging/chen-appimage/package.py _Build/appimage _Build/KytyPS5.AppDir
@@ -51,6 +73,9 @@ jobs:
           mkdir -p '_Build/smoke home' _Build/screenshots
           export HOME="$PWD/_Build/smoke home"
           export XDG_DATA_HOME="$HOME/data" XDG_CONFIG_HOME="$HOME/config" XDG_CACHE_HOME="$HOME/cache"
+          export XDG_RUNTIME_DIR="$RUNNER_TEMP/kyty-xdg-runtime"
+          mkdir -p "$XDG_RUNTIME_DIR"
+          chmod 700 "$XDG_RUNTIME_DIR"
           unset LD_LIBRARY_PATH QT_PLUGIN_PATH QT_QPA_PLATFORM_PLUGIN_PATH
           APPIMAGE_EXTRACT_AND_RUN=1 "$image" --emulator --help > _Build/final-help.log
           APPIMAGE_EXTRACT_AND_RUN=1 "$image" --dry-run > _Build/final-launch.log
@@ -61,7 +86,7 @@ jobs:
           ./squashfs-root/AppRun --emulator --help > extracted-help.log
           test -d "$XDG_DATA_HOME/KytyPS5-chenxiao07/.runtime"
       - name: Upload AppImage and checksum
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: KytyPS5-chenxiao07-AppImage-x86_64
           path: _Build/output/
@@ -69,7 +94,7 @@ jobs:
           retention-days: 30
       - name: Upload build and startup evidence
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: chenxiao07-build-evidence
           path: |
