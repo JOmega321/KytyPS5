@@ -8,6 +8,7 @@
 #include <array>
 #include <atomic>
 #include <cstdio>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -18,6 +19,7 @@
 #include <vulkan/vulkan.h>
 
 #include "../../src/local/fsr411/fsr411.h"
+#include "../../src/local/fsr4-formats.h"
 
 namespace {
 std::atomic_uint validation_errors{0};
@@ -225,11 +227,22 @@ Image CreateImage(const Gpu& gpu, VkFormat format, uint32_t w, uint32_t h, VkIma
 
 int main(int argc,char **argv) {
     setvbuf(stdout,nullptr,_IONBF,0);
-    if(argc<3 || argc>6){std::fprintf(stderr,"usage: native-frame-test ASSETS NEW_OUTPUT.raw [RENDER_WxH] [OUTPUT_WxH] [FRAMES]\n");return 2;}
+    if(argc<3 || argc>8){std::fprintf(stderr,"usage: native-frame-test ASSETS NEW_OUTPUT.raw [RENDER_WxH] [OUTPUT_WxH] [FRAMES] [rgba16f|r11g11b10] [sharpen|no-sharpen]\n");return 2;}
     uint32_t rw=320,rh=180,ow=640,oh=360;int frames=argc>5?std::atoi(argv[5]):3;
     if((argc>3 && std::sscanf(argv[3],"%ux%u",&rw,&rh)!=2) ||
        (argc>4 && std::sscanf(argv[4],"%ux%u",&ow,&oh)!=2) || !rw || !rh || rw>ow || rh>oh || ow>3840 || oh>2160 || frames<1 || frames>8){std::fprintf(stderr,"Supported output is up to 3840x2160, with 1 to 8 frames\n");return 2;}
     if(double(ow)/rw>3.01 || double(oh)/rh>3.01){std::fprintf(stderr,"Upscale ratio exceeds the audited 3x model\n");return 2;}
+    const std::string format=argc>6?argv[6]:"rgba16f";
+    const std::string sharpening=argc>7?argv[7]:"sharpen";
+    if((format!="rgba16f" && format!="r11g11b10") || (sharpening!="sharpen" && sharpening!="no-sharpen")) {
+        std::fprintf(stderr,"Unknown output format or sharpening mode\n");return 2;
+    }
+    const bool packed=format=="r11g11b10";
+    const VkFormat output_format=packed?VK_FORMAT_B10G11R11_UFLOAT_PACK32:VK_FORMAT_R16G16B16A16_SFLOAT;
+    if(!Libs::Graphics::Fsr4OutputFormatSupported(output_format)) {
+        std::fprintf(stderr,"Game integration rejects the selected output format\n");return 1;
+    }
+    std::printf("Output format: %s; sharpening: %s\n",format.c_str(),sharpening.c_str());
     FILE *file=std::fopen(argv[2],"wbx");if(!file){std::perror("new output file");return 2;}
     setenv("BB_FSR411_VARIANT","int8",1);
     std::printf("EXPERIMENTAL native FSR 4.1.2 INT8 frame test; no AMD reference comparison yet.\n");
@@ -238,7 +251,7 @@ int main(int argc,char **argv) {
     Image color=CreateImage(gpu,VK_FORMAT_R16G16B16A16_SFLOAT,rw,rh,usage,VK_IMAGE_ASPECT_COLOR_BIT);
     Image depth=CreateImage(gpu,VK_FORMAT_R32_SFLOAT,rw,rh,usage,VK_IMAGE_ASPECT_COLOR_BIT);
     Image motion=CreateImage(gpu,VK_FORMAT_R16G16_SFLOAT,rw,rh,usage,VK_IMAGE_ASPECT_COLOR_BIT);
-    Image output=CreateImage(gpu,VK_FORMAT_R16G16B16A16_SFLOAT,ow,oh,usage,VK_IMAGE_ASPECT_COLOR_BIT);
+    Image output=CreateImage(gpu,output_format,ow,oh,usage,VK_IMAGE_ASPECT_COLOR_BIT);
     VkCommandPoolCreateInfo pci{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};pci.flags=VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;pci.queueFamilyIndex=gpu.family;
     VkCommandPool pool;CHECK(vkCreateCommandPool(gpu.device,&pci,nullptr,&pool));
     VkCommandBufferAllocateInfo cai{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};cai.commandPool=pool;cai.level=VK_COMMAND_BUFFER_LEVEL_PRIMARY;cai.commandBufferCount=1;
@@ -278,12 +291,12 @@ int main(int argc,char **argv) {
     {
         Fsr411::Upscaler upscaler(gpu.physical,gpu.device,argv[1]);
         for(int i=0;i<frames;i++) {
-            CHECK(vkBeginCommandBuffer(cmd,&begin));Fsr411::Frame f;f.cmdbuf=cmd;f.color={color.image,color.view,rw,rh};f.depth={depth.image,depth.view,rw,rh};f.motion={motion.image,motion.view,rw,rh};f.output={output.image,output.view,ow,oh};f.render_width=rw;f.render_height=rh;f.ultra_performance=double(ow)/rw>2.5;f.jitter[0]=0.25f*float(i%4)-0.375f;f.jitter[1]=0.125f;f.sharpen=true;f.sharpness=0.5f;f.reset=i==0;f.auto_exposure=true;
+            CHECK(vkBeginCommandBuffer(cmd,&begin));Fsr411::Frame f;f.cmdbuf=cmd;f.color={color.image,color.view,rw,rh};f.depth={depth.image,depth.view,rw,rh};f.motion={motion.image,motion.view,rw,rh};f.output={output.image,output.view,ow,oh};f.render_width=rw;f.render_height=rh;f.ultra_performance=double(ow)/rw>2.5;f.jitter[0]=0.25f*float(i%4)-0.375f;f.jitter[1]=0.125f;f.sharpen=sharpening=="sharpen";f.sharpness=f.sharpen?0.5f:0.0f;f.reset=i==0;f.auto_exposure=true;
             if(!upscaler.Record(f)){std::fprintf(stderr,"Native replay failed: %s\n",upscaler.Error().c_str());std::fclose(file);return 1;}
             submit();std::printf("Native Vulkan frame %d completed (%ux%u -> %ux%u)\n",i,rw,rh,ow,oh);
         }
     }
-    const VkDeviceSize size=VkDeviceSize(ow)*oh*8;
+    const VkDeviceSize size=VkDeviceSize(ow)*oh*(packed?4:8);
     Buffer readback=CreateHostBuffer(gpu,size,VK_BUFFER_USAGE_TRANSFER_DST_BIT);
     CHECK(vkBeginCommandBuffer(cmd,&begin));barrier.srcAccessMask=VK_ACCESS_SHADER_WRITE_BIT;barrier.dstAccessMask=VK_ACCESS_TRANSFER_READ_BIT;
     vkCmdPipelineBarrier(cmd,VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,VK_PIPELINE_STAGE_TRANSFER_BIT,0,1,&barrier,0,nullptr,0,nullptr);
@@ -292,7 +305,21 @@ int main(int argc,char **argv) {
     barrier.srcAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT;barrier.dstAccessMask=VK_ACCESS_HOST_READ_BIT;
     vkCmdPipelineBarrier(cmd,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_HOST_BIT,0,1,&barrier,0,nullptr,0,nullptr);submit();
     const auto *pixels=static_cast<const uint16_t*>(readback.data);size_t bad=0,nonzero=0,unchanged=0,rgb_nonzero=0;
-    for(size_t i=0;i<size_t(ow)*oh*4;i++){bad+=(pixels[i]&0x7c00u)==0x7c00u;nonzero+=(pixels[i]&0x7fffu)!=0;unchanged+=pixels[i]==Half(17.0f);rgb_nonzero+=(i%4!=3 && (pixels[i]&0x7fffu)!=0);}
+    if(packed) {
+        const auto decode=[](uint32_t bits, unsigned mantissa_bits) {
+            const unsigned exponent=bits>>mantissa_bits;
+            const float fraction=float(bits&((1u<<mantissa_bits)-1))/float(1u<<mantissa_bits);
+            if(exponent==31)return INFINITY;
+            return exponent?std::ldexp(1.0f+fraction,int(exponent)-15):std::ldexp(fraction,-14);
+        };
+        const auto *words=static_cast<const uint32_t*>(readback.data);
+        for(size_t i=0;i<size_t(ow)*oh;i++) {
+            const float rgb[]={decode(words[i]&2047u,6),decode((words[i]>>11)&2047u,6),decode(words[i]>>22,5)};
+            for(float value:rgb){bad+=!std::isfinite(value);nonzero+=value!=0;rgb_nonzero+=value!=0;unchanged+=value==17.0f;}
+        }
+    } else {
+        for(size_t i=0;i<size_t(ow)*oh*4;i++){bad+=(pixels[i]&0x7c00u)==0x7c00u;nonzero+=(pixels[i]&0x7fffu)!=0;unchanged+=pixels[i]==Half(17.0f);rgb_nonzero+=(i%4!=3 && (pixels[i]&0x7fffu)!=0);}
+    }
     const bool written=std::fwrite(readback.data,1,size_t(size),file)==size_t(size);const bool closed=std::fclose(file)==0;
     std::printf("Readback: %llu bytes, nonfinite=%zu, nonzero=%zu, untouched sentinel components=%zu\n",static_cast<unsigned long long>(size),bad,nonzero,unchanged);
     vkUnmapMemory(gpu.device,input.memory);vkDestroyBuffer(gpu.device,input.buffer,nullptr);vkFreeMemory(gpu.device,input.memory,nullptr);

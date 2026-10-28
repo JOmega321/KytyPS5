@@ -47,6 +47,12 @@ per captured configuration were checked against the replay's constants,
 dispatch order and group counts. Only the user's own DLL supplies shader and
 weight bytes; none are included in the AppImage or repository.
 
+The scene color stays RGBA16F and motion vectors RG16F. Both RGBA16F and the
+game's packed `B10G11R11_UFLOAT_PACK32` HDR output are accepted: the native
+postpass and RCAS use formatless float storage writes, so both write directly
+into the game's output view. Internal history remains RGBA16F. CI tests all four
+families with packed output, sharpening on and off, and synchronization validation.
+
 The native programs require Vulkan 1.3, linear compute derivatives, integer dot
 products, FP16/INT8/INT16, extended storage-image formats and push descriptors.
 Unlike the prior DXIL conversion, these official Vulkan INT8 shaders do not

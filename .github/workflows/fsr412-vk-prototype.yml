@@ -98,6 +98,7 @@ jobs:
       - name: Build and execute native frames with software Vulkan and validation
         env:
           FSR412_VALIDATE: '1'
+          VK_LAYER_VALIDATE_SYNC: '1'
         run: |
           set -o pipefail
           bash tools/fsr412-vk/build-frame-test.sh _Build/native-test "$PWD/_Build/vulkan-headers/include"
@@ -114,7 +115,19 @@ jobs:
           t2160_m0 1280x720 2560x1440 1
           t2160_m1 1280x720 3840x2160 1
           FRAMES
-          cat _Build/native-t*.log > _Build/native-frame-test.log
+          # Demon's Souls uses B10G11R11 packed HDR output. Exercise both final
+          # writers: direct postpass with sharpening off, and RCAS with it on.
+          while read -r family render output; do
+            for mode in sharpen no-sharpen; do
+              timeout 360 _Build/native-test/native-frame-test _Build/all-assets "_Build/packed-$family-$mode.raw" "$render" "$output" 3 r11g11b10 "$mode" 2>&1 | tee "_Build/packed-$family-$mode.log"
+            done
+          done <<'PACKED'
+          t1080_m0 320x180 640x360
+          t1080_m1 320x180 960x540
+          t2160_m0 1280x720 2560x1440
+          t2160_m1 1280x720 3840x2160
+          PACKED
+          cat _Build/native-t*.log _Build/packed-t*.log > _Build/native-frame-test.log
       - name: Package native frame test without AMD assets
         run: |
           dist=_Build/native-test-distribution
@@ -123,6 +136,7 @@ jobs:
           cp tools/fsr412-vk/{extract_vk.py,adapt_spirv.py,recover_assets.py,host-int8-t1080-m0.json,run-native-test.sh,NATIVE-TEST.md} "$dist/"
           cp -r tools/fsr412-vk/recipes "$dist/"
           cp tools/fsr412-vk/{native_frame_test.cpp,build-frame-test.sh} "$dist/source/tools/fsr412-vk/"
+          cp src/local/fsr4-formats.h "$dist/source/src/local/"
           cp src/local/fsr411/{fsr411.cpp,fsr411.h} "$dist/source/src/local/fsr411/"
           cp LICENSE "$dist/"
           cp _Build/native-frame-test.log "$dist/"
@@ -144,6 +158,7 @@ jobs:
           path: |
             _Build/host-capture-*.json
             _Build/native-t*.log
+            _Build/packed-t*.log
             _Build/all-recovery.json
           if-no-files-found: ignore
           retention-days: 30

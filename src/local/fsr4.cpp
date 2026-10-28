@@ -1,4 +1,5 @@
 #include "local/fsr4.h"
+#include "local/fsr4-formats.h"
 #include "graphics/host_gpu/graphicContext.h"
 #include "local/fsr411/fsr411.h"
 #include <algorithm>
@@ -50,8 +51,10 @@ bool Fsr4Upscale(GraphicContext& graphics, vk::CommandBuffer command, const Fram
         if (!image->view || image->base_level || image->base_layer)
             return fail("whole images with valid views are required");
     if (in.color.format != vk::Format::eR16G16B16A16Sfloat ||
-        in.output.format != vk::Format::eR16G16B16A16Sfloat || in.motion.format != vk::Format::eR16G16Sfloat)
-        return fail("expected RGBA16F scene/output and RG16F motion vectors");
+        !Fsr4OutputFormatSupported(static_cast<VkFormat>(in.output.format)) || in.motion.format != vk::Format::eR16G16Sfloat)
+        return fail("unsupported image formats: scene=" + vk::to_string(in.color.format) +
+                    ", output=" + vk::to_string(in.output.format) + ", motion=" + vk::to_string(in.motion.format) +
+                    "; expected RGBA16F scene, RGBA16F or B10G11R11 output, and RG16F motion");
     if (!state->upscaler) {
         const char* dir = std::getenv("KYTY_FSR412_DIR");
         const std::string folder = dir && *dir ? dir : "fsr4_412";

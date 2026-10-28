@@ -62,6 +62,18 @@ included beside this file. License: GPL-2.0-or-later for original/test code;
 included SDK interface headers retain AMD's MIT notice. No AMD DLL, shader,
 weight, or frame bytes are distributed in this package.
 
+For the game's packed HDR output, the binary also accepts output-format and
+sharpening arguments (the raw output then has one packed 32-bit pixel per texel):
+
+```bash
+./native-frame-test /path/to/all-assets ./packed.raw 1280x720 2560x1440 3 r11g11b10 no-sharpen
+```
+
+All four asset families can be prepared into a new directory with
+`python3 recover_assets.py ./amd_fidelityfx_upscaler_vk.dll ./all-assets --all`.
+The standalone wrapper retains its simpler RGBA16F test. `VK_LAYER_VALIDATE_SYNC=1`
+adds synchronization validation when `FSR412_VALIDATE=1` is enabled.
+
 Full source and CI: https://github.com/JOmega321/KytyPS5/tree/chen-kytyps5-fsr412-linux
 The exact packaged source revision is in `SOURCE_COMMIT`.
 To rebuild the frame test, provide Vulkan-Headers at commit
