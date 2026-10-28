@@ -1,8 +1,13 @@
 # FSR 4.1.2 Vulkan DLL → Linux experiment
 
-This is an **asset conversion prototype**, not a working FSR 4.1.2 replacement.
-It does not export AMD's `ffxCreateContext` / `ffxDispatch` API and cannot yet
-be selected as an upscaler in Kyty. The current FSR4 branch is unchanged.
+This branch contains shader extraction, an offline host-call recorder, and an
+**experimental standalone native INT8 frame test**. It does not export AMD's
+`ffxCreateContext` / `ffxDispatch` API and cannot yet be selected as an upscaler
+in Kyty. The existing FSR4 AppImage branch is unchanged.
+
+See [NATIVE-TEST.md](NATIVE-TEST.md) for the prebuilt frame-test package and the
+single-command test. The initial `native-probe` described below only reads
+shader bytes; it does not execute frames.
 
 The SDK 2.4 Vulkan DLL contains SPIR-V in the publicly documented compressed
 shader format. `extract_vk.py` decompresses those GPU programs entirely on Linux,
@@ -42,16 +47,39 @@ SHA-256: `4a7e895af6e0b615d40a84d59eb8c2b1054ad91cdd0c739567940270d51bdab7`.
 - Native ELF loader: all 1,002 converted FSR4 modules read successfully on Linux.
 - Unit tests cover malformed PE files, invalid compression/size limits, duplicate
   shaders, and native pack bounds and instruction checks.
-- No GPU is available in the development environment. No dispatch, game frame,
-  image equivalence, temporal stability or performance result is claimed.
+- No Radeon GPU is available in the development environment. The separate frame
+  test can use Mesa software Vulkan. A software result does not establish
+  hardware compatibility, image equivalence, temporal stability, or performance.
+
+## Host setup and initializer recovery
+
+`capture_vk.c` implements a fake Vulkan device. `capture_main.c` runs the signed
+DLL's CPU provider under Wine and redirects its Windows adapter queries to an
+explicitly synthetic identity. It refuses FSR3 fallback and records selected
+pipelines, buffer uploads, descriptors, constants, groups and barriers.
+It performs no GPU work. The SDK requires a Windows adapter LUID and Windows
+GDI ASIC-family/revision queries before exposing its FSR4 provider.
+
+CI observed the normal INT8 model at 1280x720 -> 1920x1080: three frames of
+29 dispatches and one 131072-byte initializer, byte-identical to DLL contents
+at offset 12741056. `host-int8-t1080-m0.json` contains hashes and observations,
+not shader or initializer bytes. `recover_assets.py` checks the user's exact
+DLL hash, recovers those assets without Wine and records file hashes/provenance.
+
+`native_frame_test.cpp` uses the existing replay host implementation to test
+these 4.1.2 assets. Its Vulkan device does not require VALVE mixed float dot
+products: the selected official INT8 shaders use KHR integer dot products and
+compute derivatives. `adapt_spirv.py` pads RGB storage-image writes to RGBA to
+satisfy the image-view component rule, preserving RGB and supplying alpha 1.
+The corresponding shader hashes and modifications are recorded separately.
 
 ## What remains before integration
 
-1. Select the correct INT8/FP8 shader permutations for each model and output tier.
+1. Extend the audited selection beyond INT8 normal-model output tier 1080p.
    Entry-point names alone are insufficient: many variants share the same name.
-2. Recover/verify the model weights, host constants, resource layouts, barriers,
-   dispatch order and workgroup counts. The 4.1.1 replay is a reference, not proof
-   that its dispatch rules or initializers fit 4.1.2.
+2. Compare all host constants, resource layouts, barriers and dispatch rules
+   across resolutions and models. The initializer and 29-pass order are now
+   observed for the first INT8 model; that does not validate all replay behavior.
 3. Replace or bridge the Windows CPU provider. This DLL imports MSVCP140,
    VCRUNTIME140, Windows CRT API sets, Kernel32, VERSION and vulkan-1.dll. Renaming
    or mechanically rewriting the file header does not implement those ABIs.

@@ -8,11 +8,11 @@ permissions:
 jobs:
   host-capture:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Install offline capture build tools
-        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends wine64 gcc-mingw-w64-x86-64-posix
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends wine64 gcc-mingw-w64-x86-64-posix libvulkan-dev mesa-vulkan-drivers vulkan-validationlayers spirv-tools
       - name: Build recorder against pinned Khronos headers
         run: |
           git clone https://github.com/KhronosGroup/Vulkan-Headers.git _Build/vulkan-headers
@@ -39,7 +39,57 @@ jobs:
             tail -n 8 _Build/capture-int8/trace.jsonl
           fi
       - name: Audit observed model initializers and dispatch sequence
-        run: python3 tools/fsr412-vk/analyze_capture.py _Build/capture-int8 _Build/capture-bin/amd_fidelityfx_upscaler_vk.dll _Build/host-capture-int8.json
+        run: |
+          python3 tools/fsr412-vk/analyze_capture.py _Build/capture-int8 _Build/capture-bin/amd_fidelityfx_upscaler_vk.dll _Build/host-capture-int8.json
+          python3 tools/fsr412-vk/check_replay_contract.py _Build/host-capture-int8.json 1280x720 1920x1080
+      - name: Recover audited native test assets from the DLL
+        run: |
+          python3 tests/fsr412-host-audit.py
+          python3 tools/fsr412-vk/recover_assets.py _Build/capture-bin/amd_fidelityfx_upscaler_vk.dll _Build/native-assets > _Build/recovery.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          old=json.loads(Path('tools/fsr412-vk/host-int8-t1080-m0.json').read_text())
+          new=json.loads(Path('_Build/host-capture-int8.json').read_text())
+          assert old['initializers']==new['initializers']
+          for k,passes in old['frames'].items():
+              assert [(p['entry'],p['sha256'],p['groups']) for p in passes]==[(p['entry'],p['sha256'],p['groups']) for p in new['frames'][k]]
+          PY
+          for shader in _Build/native-assets/t1080_m0/*.spv; do spirv-val --target-env vulkan1.3 "$shader"; done
+      - name: Build current-enough Khronos validation layer
+        run: bash tools/fsr412-vk/build-validation.sh "$PWD/_Build/validation" "$PWD/_Build/vulkan-headers"
+      - name: Build and execute native frames with software Vulkan and validation
+        env:
+          FSR412_VALIDATE: '1'
+        run: |
+          set -o pipefail
+          bash tools/fsr412-vk/build-frame-test.sh _Build/native-test "$PWD/_Build/vulkan-headers/include"
+          lvp=$(find /usr/share/vulkan/icd.d -name '*lvp*' -print -quit)
+          test -n "$lvp"
+          export VK_DRIVER_FILES="$lvp"
+          export VK_LAYER_PATH="$PWD/_Build/validation/build/layers"
+          export LD_LIBRARY_PATH="$PWD/_Build/validation/build/layers${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          timeout 240 _Build/native-test/native-frame-test _Build/native-assets _Build/native-output.raw 320x180 640x360 3 2>&1 | tee _Build/native-frame-test.log
+      - name: Package native frame test without AMD assets
+        run: |
+          dist=_Build/native-test-distribution
+          mkdir -p "$dist/source/tools/fsr412-vk" "$dist/source/src/local/fsr411"
+          cp _Build/native-test/native-frame-test "$dist/"
+          cp tools/fsr412-vk/{extract_vk.py,adapt_spirv.py,recover_assets.py,host-int8-t1080-m0.json,run-native-test.sh,NATIVE-TEST.md} "$dist/"
+          cp tools/fsr412-vk/{native_frame_test.cpp,build-frame-test.sh} "$dist/source/tools/fsr412-vk/"
+          cp src/local/fsr411/{fsr411.cpp,fsr411.h} "$dist/source/src/local/fsr411/"
+          cp LICENSE "$dist/"
+          cp _Build/native-frame-test.log "$dist/"
+          git rev-parse HEAD > "$dist/SOURCE_COMMIT"
+          cd "$dist"
+          sha256sum native-frame-test extract_vk.py adapt_spirv.py recover_assets.py host-int8-t1080-m0.json run-native-test.sh > SHA256SUMS
+      - name: Upload native frame test (no DLL, shaders, weights, or frames)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: fsr412-native-frame-test-x86_64
+          path: _Build/native-test-distribution/
+          if-no-files-found: error
+          retention-days: 30
       - name: Upload host audit metadata only
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:

@@ -10,6 +10,7 @@ import collections
 import hashlib
 import json
 from pathlib import Path
+import struct
 
 from extract_vk import reflect
 
@@ -53,14 +54,22 @@ def analyze(root, dll):
             if e['pipeline'] not in pipelines or len(e['groups']) != 3 or any(not isinstance(x, int) or x < 1 for x in e['groups']):
                 raise ValueError('invalid dispatch or missing pipeline')
             pipeline = pipelines[e['pipeline']]
-            frames[e['frame']].append({'entry': pipeline['entry'], 'sha256': pipeline['sha256'], 'groups': e['groups']})
+            recorded = {'entry': pipeline['entry'], 'sha256': pipeline['sha256'], 'groups': e['groups'], 'constants': {}}
+            frames[e['frame']].append(recorded)
             bindings = {(b['set'], b['binding']): b for b in e['bindings']}
             if len(bindings) != len(e['bindings']):
                 raise ValueError('duplicate descriptor binding')
             for binding in pipeline['reflection']['bindings']:
+                observed = bindings.get((binding['set'], binding['binding']))
+                # Uniforms describe host decisions, not model weights. Preserve exact bits
+                # for checking a proposed native replay against the provider's CPU code.
+                if observed and observed['type'] == 6 and 'data' in observed:
+                    data = local_file(root, observed['data'])
+                    if len(data) > 4096 or len(data) % 4:
+                        raise ValueError('unexpected constant buffer size')
+                    recorded['constants'][binding['name']] = list(struct.unpack('<'+'I'*(len(data)//4), data))
                 if binding['name'] != 'InitializerBuffer':
                     continue
-                observed = bindings.get((binding['set'], binding['binding']))
                 if not observed or 'data' not in observed:
                     raise ValueError('model initializer was not captured')
                 data = local_file(root, observed['data'])
@@ -99,7 +108,9 @@ def main():
     a = p.parse_args()
     result = analyze(a.capture, a.dll.read_bytes())
     a.report.write_text(json.dumps(result, indent=2) + '\n')
-    print(json.dumps(result, indent=2))
+    summary = {k: v for k, v in result.items() if k != 'frames'}
+    summary['frame_dispatch_counts'] = {k: len(v) for k, v in result['frames'].items()}
+    print(json.dumps(summary, indent=2))
 
 
 if __name__ == '__main__':

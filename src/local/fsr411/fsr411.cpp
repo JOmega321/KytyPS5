@@ -20,6 +20,7 @@
 #include <vector>
 
 
+#if !defined(KYTY_FSR_STANDALONE)
 #include "graphics/host_gpu/graphicContext.h"
 #include "local/vulkan-recording.h"
 #if defined(KYTY_LOCAL_VULKAN_RECORDING)
@@ -65,6 +66,7 @@
 #define vkGetPhysicalDeviceProperties KYTY_FSR_DISPATCH.vkGetPhysicalDeviceProperties
 #define vkGetQueryPoolResults KYTY_FSR_DISPATCH.vkGetQueryPoolResults
 #define vkMapMemory KYTY_FSR_DISPATCH.vkMapMemory
+#endif // KYTY_FSR_STANDALONE: link the plain Vulkan loader for isolated tests
 
 namespace Fsr411 {
 
