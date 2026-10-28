@@ -1,9 +1,9 @@
-name: Build AppImage
+name: Build AppImage PR1747 test
 
 on:
   workflow_dispatch:
   push:
-    branches: [appimage]
+    branches: [appimage-pr1747-test]
 
 permissions:
   contents: read
@@ -23,30 +23,11 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
-      - name: Find reusable binaries for packaging-only changes
-        id: reuse
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh api "repos/$GITHUB_REPOSITORY/actions/workflows/appimage.yml/runs?branch=appimage&status=success&per_page=10" > previous-runs.json
-          while read -r run_id base_sha; do
-            [[ "$run_id" =~ ^[0-9]+$ && "$base_sha" =~ ^[0-9a-f]{40}$ ]]
-            # Every source/dependency file must match; only packaging and CI may differ.
-            if git diff --quiet "$base_sha" HEAD -- . ':!packaging/**' ':!.github/**'; then
-              artifact_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts" \
-                --jq '.artifacts[] | select(.name == "KytyPS5-AppImage-x86_64" and .expired == false) | .id')"
-              if test -n "$artifact_id"; then
-                echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
-                break
-              fi
-            fi
-          done < <(jq -r '.workflow_runs[] | [.id, .head_sha] | @tsv' previous-runs.json)
-
       - name: Install build and packaging dependencies
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends --yes \
-            clang lld ninja-build cmake glslang-tools python3 pkg-config \
+            clang lld ninja-build cmake glslang-tools python3 pkg-config ccache \
             libgl1-mesa-dev libx11-dev libxcursor-dev libxext-dev libxfixes-dev \
             libxi-dev libxrandr-dev libxss-dev libxtst-dev libxkbcommon-dev \
             libasound2-dev libpulse-dev libudev-dev libdbus-1-dev \
@@ -55,7 +36,6 @@ jobs:
             libxcb-cursor0 libxkbcommon-x11-0
 
       - name: Install Qt
-        if: steps.reuse.outputs.run_id == ''
         uses: jurplel/install-qt-action@v4
         with:
           version: '6.10.3'
@@ -65,11 +45,11 @@ jobs:
           cache: true
 
       - name: Configure
-        if: steps.reuse.outputs.run_id == ''
         run: |
           cmake -S . -B _Build/appimage -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" \
             -DKYTY_BUILD_ORIGIN=Fork \
             -DKYTY_BUILD_REPOSITORY="$GITHUB_REPOSITORY" \
@@ -79,43 +59,29 @@ jobs:
           done
 
       - name: Build and install
-        if: steps.reuse.outputs.run_id == ''
         run: |
-          cmake --build _Build/appimage --target launcher --parallel "$(nproc)"
+          cmake --build _Build/appimage --target launcher resource_tracking_tests resource_materialization_tests --parallel "$(nproc)"
           cmake --install _Build/appimage --prefix "$PWD/_Build/appimage/install"
 
-      - name: Download matching previous AppImage
-        if: steps.reuse.outputs.run_id != ''
-        uses: actions/download-artifact@v4
-        with:
-          name: KytyPS5-AppImage-x86_64
-          path: _Build/prebuilt
-          run-id: ${{ steps.reuse.outputs.run_id }}
-          github-token: ${{ github.token }}
-
-      - name: Verify and extract previous AppImage
-        if: steps.reuse.outputs.run_id != ''
+      - name: Test shader resource tracking and materialization
         run: |
-          (cd _Build/prebuilt && sha256sum --check ./*.sha256)
-          image="$(realpath _Build/prebuilt/*.AppImage)"
-          chmod +x "$image"
-          mkdir -p _Build/repack
-          (cd _Build/repack && "$image" --appimage-extract)
+          ctest --test-dir _Build/appimage --output-on-failure \
+            -R '^(resource_tracking|resource_materialization)$' 2>&1 | tee resource-tests.log
 
       - name: Package
         run: |
           desktop-file-validate packaging/appimage/kytyps5.desktop
-          if test -d _Build/repack/squashfs-root; then
-            bash packaging/appimage/package.sh _Build/repack/squashfs-root _Build/appimage-output repack
-          else
-            bash packaging/appimage/package.sh _Build/appimage/install
-          fi
+          VERSION="PR1747-$(git rev-parse --short HEAD)" bash packaging/appimage/package.sh _Build/appimage/install
 
       - name: Check packaged CLI and graphical startup
         run: |
           image="$(realpath _Build/appimage-output/*.AppImage)"
           export APPIMAGE_EXTRACT_AND_RUN=1
-          export XDG_DATA_HOME="$RUNNER_TEMP/kyty-appimage-data"
+          export HOME="$RUNNER_TEMP/kyty-pr1747-home"
+          export XDG_DATA_HOME="$RUNNER_TEMP/kyty-pr1747-data"
+          export XDG_CONFIG_HOME="$RUNNER_TEMP/kyty-pr1747-config"
+          export XDG_CACHE_HOME="$RUNNER_TEMP/kyty-pr1747-cache"
+          mkdir -p "$HOME" "$XDG_DATA_HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME"
           "$image" --emulator --help
           set +e
           QT_DEBUG_PLUGINS=1 timeout --signal=TERM 15s xvfb-run -a "$image" --local > launcher.log 2>&1
@@ -123,7 +89,7 @@ jobs:
           set -e
           cat launcher.log
           test "$result" -eq 124
-          test -d "$XDG_DATA_HOME/KytyPS5"
+          test -d "$XDG_DATA_HOME/KytyPS5-PR1747"
           if grep -Ei 'could not load the Qt platform plugin|error while loading shared libraries|symbol lookup error|Aborted|Segmentation fault' launcher.log; then
             exit 1
           fi
@@ -131,7 +97,7 @@ jobs:
       - name: Upload AppImage
         uses: actions/upload-artifact@v4
         with:
-          name: KytyPS5-AppImage-x86_64
+          name: KytyPS5-PR1747-test-x86_64
           path: _Build/appimage-output/*
           if-no-files-found: error
 
@@ -139,8 +105,10 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: KytyPS5-AppImage-logs
+          name: KytyPS5-PR1747-test-logs
           path: |
             configure.log
             launcher.log
+            resource-tests.log
+            _Build/appimage/Testing/Temporary/LastTest.log
           if-no-files-found: ignore

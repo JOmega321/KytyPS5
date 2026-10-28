@@ -70,6 +70,7 @@ done < <(find "$appdir/usr/bin/plugins" -type f -name '*.so*' -print0)
 # available to Qt without retaining a second, unpatched copy of each library.
 rm -rf -- "$appdir/usr/bin/lib"
 ln -s ../lib "$appdir/usr/bin/lib"
+python3 "$root/packaging/appimage/audit_appdir.py" "$appdir" --arch x86_64 --resolve
 "$deploy" --appdir "$appdir" --output appimage
 test -s "$OUTPUT"
 chmod +x "$OUTPUT"

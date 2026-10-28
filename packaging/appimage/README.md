@@ -1,57 +1,24 @@
-# KytyPS5 AppImage
+# PR1747 experimental test build
 
-This fork's **Build AppImage** GitHub Actions workflow builds native Linux
-x86-64 binaries, bundles their runtime dependencies, and uploads an AppImage
-plus its SHA-256 checksum as the `KytyPS5-AppImage-x86_64` artifact. It runs on
-pushes to `appimage`.
-The original Windows/macOS/Linux workflow is unchanged.
+This branch applies https://github.com/KytyPS5/KytyPS5/pull/1747 at head
+`930d50b208427417630849a5d2e23c6da7e22776` to the existing AppImage baseline
+(upstream `1be1c6c4f928e52f740ae7f76841c1da74220e54`). It retains later upstream
+changes during the three-way patch application. The stable `appimage` branch
+is unchanged. The PR is unmerged and gameplay on AMD/Linux is not established.
 
-When only packaging or CI files have changed, the workflow can reuse a
-previous successful build's binaries. It requires an exact match for every
-file outside `packaging/` and `.github/`, verifies the previous artifact's
-SHA-256 checksum, then repackages and repeats the startup checks. Source or
-dependency changes trigger a complete build.
+Download `KytyPS5-PR1747-test-x86_64` from the successful Actions run, extract
+it, mark the AppImage executable, and add your game folder in the fresh launcher.
 
-Download and extract the artifact ZIP, mark the `.AppImage` executable in your
-file manager, and launch it. A current Vulkan 1.3 driver is required from the
-host. The Ubuntu 24.04 build targets distributions with glibc 2.39 or newer;
-it is not intended for older Linux releases. Fedora 44 meets that baseline.
+The test defaults to separate data under
+`${XDG_DATA_HOME:-$HOME/.local/share}/KytyPS5-PR1747`, settings under
+`${XDG_CONFIG_HOME:-$HOME/.config}/KytyPS5-PR1747/Kyty/Kyty.ini`, and XDG cache
+under `${XDG_CACHE_HOME:-$HOME/.cache}/KytyPS5-PR1747`. Existing normal saves
+are not migrated automatically. `KYTY_APPIMAGE_DATA_DIR`,
+`KYTY_PR1747_CONFIG_HOME`, and `KYTY_PR1747_CACHE_HOME` permit explicit overrides.
+The built-in directory updater remains disabled for this fork build.
 
-```bash
-chmod +x KytyPS5-*-x86_64.AppImage
-./KytyPS5-<version>-x86_64.AppImage
-```
-
-Settings use the launcher's normal location (`~/.config/Kyty/Kyty.ini`, unless
-overridden by `XDG_CONFIG_HOME` or a local `Kyty.ini`). Saves, shader caches,
-patches, compatibility data, and logs use
-`${XDG_DATA_HOME:-$HOME/.local/share}/KytyPS5`. Replacing the AppImage preserves
-these files. Existing saves from a different installation must be copied there
-manually. Set `KYTY_APPIMAGE_DATA_DIR` to an absolute path to override it.
-
-For CLI use, pass `--emulator` before the emulator arguments. Use absolute
-paths for game files because the working directory is the data directory:
-
-```bash
-./KytyPS5-<version>-x86_64.AppImage --emulator --game /absolute/path/to/game
-```
-
-If FUSE is unavailable, use `APPIMAGE_EXTRACT_AND_RUN=1` when launching.
-The official in-place updater is disabled by `KYTY_BUILD_ORIGIN=Fork`; install
-updates by downloading a newly built AppImage from this fork.
-
-## Local packaging
-
-Build and install using the repository's Linux instructions, then run:
-
-```bash
-bash packaging/appimage/package.sh _Build/linux/install
-```
-
-The script checks the linuxdeploy download against a SHA-256 digest. If the
-upstream continuous asset changes, inspect the new release and update the
-digest deliberately. Output defaults to `_Build/appimage-output/`.
-
-The workflow checks the packaged emulator's `--help` and runs the graphical
-launcher under Xvfb. Actual game rendering, sound, input, and Fedora/Wayland
-behavior require testing on a desktop with a supported GPU.
+CI builds from source and runs `resource_tracking` (including indexed-write
+footprint regression cases) and `resource_materialization`, then checks the
+packaged emulator CLI and launcher startup under Xvfb. The GPU-backed descriptor
+caller test included in the PR is not run on this hosted runner. Actual Demon's
+Souls gameplay and RX 9060 XT hardware rendering need verification on your PC.

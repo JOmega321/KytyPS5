@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=KytyPS5
+Name=KytyPS5 (PR1747 test)
 Comment=PlayStation 5 translation layer
 Exec=kyty_launcher
 Icon=kytyps5
