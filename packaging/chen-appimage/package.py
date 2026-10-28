@@ -46,6 +46,7 @@ version = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=T
     subprocess.check_output(['git', 'submodule', 'status', '--recursive'], cwd=root, text=True)
     + '\n' + (build / 'CMakeCache.txt').read_text())
 with (payload / 'build-manifest.txt').open('a') as manifest:
+    manifest.write('\nEmbedded native version metadata:\n' + (build / 'kytyGitVersion.h').read_text())
     for command in (['clang', '--version'], ['cmake', '--version'], ['ldd', '--version']):
         manifest.write('\n' + subprocess.check_output(command, text=True))
     for dependency in sorted((build / '_deps').glob('*-src')):
@@ -85,6 +86,7 @@ while pending:
 for elf in [*(p for p in libdir.iterdir() if p.is_file()), *(payload / n for n in ('kyty_emulator', 'kyty_launcher', 'kyty_shader_precompile'))]:
     rpath = '$ORIGIN' if elf.parent == libdir else '$ORIGIN/lib'
     subprocess.run(['patchelf', '--set-rpath', rpath, str(elf)], check=True)
+    subprocess.run(['strip', '--strip-unneeded', str(elf)], check=True)
 for source in ('AppRun', 'kytyps5.desktop', 'kytyps5.svg'):
     shutil.copy2(root / 'packaging/chen-appimage' / source, appdir / source)
 (appdir / 'AppRun').chmod(0o755)
