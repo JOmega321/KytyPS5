@@ -799,7 +799,10 @@ void LauncherWindow::PlayPage() {
 			check(Mark::Good, T("dlss.ok"));
 		else
 			check(Mark::Busy, T(context_.rtx ? "dlss.noLibrary" : "dlss.noRtx"));
-		check(Mark::Good, T("fsr.ok"));
+		if (S().Str("upscaler") == "fsr4")
+            check(Mark::Warn, "FSR 4.1.1 requested; assets and device support are checked when the game starts");
+        else
+            check(Mark::Good, T("fsr.ok"));
 	});
 	ImGui::EndChild();
 	ImGui::SameLine(0, gap);
@@ -1045,6 +1048,8 @@ void LauncherWindow::GraphicsPage() {
 	std::string note;
 	if (chosen == "fsr")
 		note = T("upscaler.fsrNote");
+	else if (chosen == "fsr4")
+		note = "Experimental INT8 replay; generate FSR 4.1.1 assets first. Missing features/assets fall back to FSR 3.";
 	else if (chosen == "off")
 		note = T("upscaler.offNote");
 	else
@@ -1509,6 +1514,7 @@ std::string LauncherWindow::Summary(std::vector<std::pair<std::string, std::stri
 	const auto res         = Times(S().Str("resolution"));
 	const bool dlss        = commands_.Dlss();
 	const auto upscaled_by =
+	    S().Str("upscaler") == "fsr4" ? std::string("FSR 4.1.1 (experimental; FSR 3 fallback)") :
 	    std::string(T(dlss                         ? "summary.dlss"
 	                : commands_.FsrUpscaler()      ? "summary.fsr3"
 	                : S().Str("upscaler") == "off" ? "summary.noAa"

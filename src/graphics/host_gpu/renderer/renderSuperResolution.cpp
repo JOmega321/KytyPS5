@@ -613,7 +613,7 @@ void RenderExecutor::RunSuperResolution(CommandBuffer& buffer, const SuperResolu
 		describe("output", output, bindings[3]);
 	}
 	if (static std::atomic<uint32_t> reports {0}; reports.fetch_add(1, std::memory_order_relaxed) < 2) {
-		std::printf("Super resolution: %s, the game's exposure %s\n", dlss ? "DLSS" : fsr ? "FSR 3" : "stretch",
+		std::printf("Super resolution: %s, the game's exposure %s\n", dlss ? "DLSS" : fsr ? "FSR (see backend status)" : "stretch",
 		            record.exposure_pass.pipeline != nullptr ? "applied" : "not applied");
 		std::fflush(stdout);
 	}
