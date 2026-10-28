@@ -22,6 +22,10 @@ AssetBuilder::Status AssetBuilder::Snapshot() const {
     return status_;
 }
 bool AssetBuilder::Installed(const std::filesystem::path& directory) {
+    std::ifstream marker(directory / "ASSET_VERSION");
+    std::string version;
+    std::getline(marker, version);
+    if (version != "FSR412_VULKAN_INT8_4.1.2.4555") return false;
     // A complete INT8 set for both output tiers and quality model families.
     static const char* passes[] = {"spd", "prepass", "pass0_post", "pass1", "pass1_post", "pass2", "pass2_post",
         "pass3", "pass3_post", "pass4", "pass4_post", "pass5", "pass5_post", "pass6", "pass6_post", "pass7",
@@ -94,8 +98,8 @@ bool AssetBuilder::Start(std::vector<std::string> argv, std::filesystem::path lo
                 size_t end;
                 while ((end = pending.find_first_of("\r\n")) != std::string::npos) {
                     auto line = pending.substr(0, end); pending.erase(0, end + 1);
-                    const std::string prefix = "[FSR411] ";
-                    if (line.rfind(prefix, 0) == 0) status_.stage = line.substr(prefix.size());
+                    for (const std::string prefix : {"[FSR411] ", "[FSR412] "})
+                        if (line.rfind(prefix, 0) == 0) status_.stage = line.substr(prefix.size());
                 }
                 if (pending.size() > 8192) pending.erase(0, pending.size() - 8192);
             }

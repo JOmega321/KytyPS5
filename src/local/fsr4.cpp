@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
+#include <fstream>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -24,10 +25,10 @@ const char* Fsr4Watermark() {
     const char* enabled = std::getenv("KYTY_FSR4_WATERMARK");
     const char* selected = std::getenv("KYTY_UPSCALER");
     if (!enabled || std::string_view(enabled) != "1" || !selected || std::string_view(selected) != "fsr4") return "";
-    if (fsr4_fallback.load()) return "FSR 3.1 fallback (FSR 4.1.1 unavailable)";
+    if (fsr4_fallback.load()) return "FSR 3.1 fallback (FSR 4.1.2 unavailable)";
     if (last_fsr4.load() && NowMs() - last_fsr4.load() < 2000)
-        return "FSR 4.1.1 INT8 | PS5 Pro path | experimental";
-    return "FSR 4.1.1 INT8 requested | awaiting upscale";
+        return "FSR 4.1.2 INT8 | PS5 Pro path | experimental";
+    return "FSR 4.1.2 INT8 requested | awaiting upscale";
 }
 
 #if defined(__linux__)
@@ -39,12 +40,12 @@ bool Fsr4Upscale(GraphicContext& graphics, vk::CommandBuffer command, const Fram
     const auto fail = [&](const std::string& reason) {
         fsr4_fallback.store(true);
         if (state->error != reason) {
-            std::printf("FSR 4.1.1 unavailable: %s; falling back to FSR 3\n", reason.c_str());
+            std::printf("FSR 4.1.2 unavailable: %s; falling back to FSR 3\n", reason.c_str());
             state->error = reason;
         }
         return false;
     };
-    if (!graphics.fsr411_enabled) return fail("required Vulkan features were not enabled");
+    if (!graphics.fsr412_enabled) return fail("required Vulkan features were not enabled");
     for (const auto* image : {&in.color, &in.depth, &in.motion, &in.output})
         if (!image->view || image->base_level || image->base_layer)
             return fail("whole images with valid views are required");
@@ -52,9 +53,15 @@ bool Fsr4Upscale(GraphicContext& graphics, vk::CommandBuffer command, const Fram
         in.output.format != vk::Format::eR16G16B16A16Sfloat || in.motion.format != vk::Format::eR16G16Sfloat)
         return fail("expected RGBA16F scene/output and RG16F motion vectors");
     if (!state->upscaler) {
-        const char* dir = std::getenv("KYTY_FSR411_DIR");
+        const char* dir = std::getenv("KYTY_FSR412_DIR");
+        const std::string folder = dir && *dir ? dir : "fsr4_412";
+        std::ifstream marker(folder + "/ASSET_VERSION");
+        std::string version;
+        std::getline(marker, version);
+        if (version != "FSR412_VULKAN_INT8_4.1.2.4555")
+            return fail("native Vulkan 4.1.2 assets are missing or from another version; use FSR4 setup");
         state->upscaler = std::make_unique<Fsr411::Upscaler>(graphics.physical_device, graphics.device,
-                                                          dir && *dir ? dir : "fsr4_411");
+                                                          folder);
     }
     const auto image = [](const FrameGen::UpscaleImage& i) {
         return Fsr411::Image{static_cast<VkImage>(i.image), static_cast<VkImageView>(i.view), i.extent.width, i.extent.height};
@@ -64,7 +71,7 @@ bool Fsr4Upscale(GraphicContext& graphics, vk::CommandBuffer command, const Fram
     frame.color = image(in.color); frame.depth = image(in.depth);
     frame.motion = image(in.motion); frame.output = image(in.output);
     frame.render_width = in.color.extent.width; frame.render_height = in.color.extent.height;
-    frame.ultra_performance = in.color.extent.width * 5 <= in.output.extent.width * 2;
+    frame.ultra_performance = in.color.extent.width * 5 < in.output.extent.width * 2;
     frame.jitter[0] = in.jitter_x; frame.jitter[1] = in.jitter_y;
     frame.motion_scale[0] = in.motion_scale_x; frame.motion_scale[1] = in.motion_scale_y;
     frame.reset = in.reset || state->first;
@@ -95,7 +102,7 @@ bool Fsr4Upscale(GraphicContext& graphics, vk::CommandBuffer command, const Fram
     barrier(true);
     if (!ok) return fail(state->upscaler->Error());
     if (state->first || !state->error.empty())
-        std::printf("Super resolution: FSR 4.1.1 experimental %s\n", state->upscaler->Describe().c_str());
+        std::printf("Super resolution: FSR 4.1.2 experimental %s\n", state->upscaler->Describe().c_str());
     last_fsr4.store(NowMs()); fsr4_fallback.store(false);
     state->first = false; state->error.clear();
     return true;

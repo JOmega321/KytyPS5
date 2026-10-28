@@ -522,7 +522,7 @@ struct Upscaler::Impl {
         std::vector<uint8_t> bytes;
         const std::string path = dir + "/" + rules->folder + set + "/" + kPasses[index] + ".spv";
         if (!ReadFile(path, bytes) || bytes.size() % 4) {
-            error = "missing " + path + " (tools/fsr4cap: capture and extract the FSR 4.1.1 assets)";
+            error = "missing " + path + " (prepare native Vulkan INT8 assets in FSR4 setup)";
             return false;
         }
         std::vector<uint32_t> words(bytes.size() / 4);

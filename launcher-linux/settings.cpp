@@ -50,7 +50,8 @@ const nlohmann::ordered_json& Defaults() {
 		d["terminal"]         = "";
 		d["precompile_quick"] = false;
 		d["fsr4_log_follow"] = true;
-        d["fsr4_dll"] = "";
+        d["fsr4_dll"] = ""; // Legacy 4.1.1 selection is preserved.
+        d["fsr412_dll"] = "";
         d["fsr4_watermark"] = false;
         d["shader_cache_dir"] = "";
         d["shader_workers"] = 0;

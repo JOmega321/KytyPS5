@@ -1,9 +1,10 @@
 # FSR 4.1.2 Vulkan DLL → Linux experiment
 
 This branch contains shader extraction, an offline host-call recorder, and an
-**experimental standalone native INT8 frame test**. It does not export AMD's
-`ffxCreateContext` / `ffxDispatch` API and cannot yet be selected as an upscaler
-in Kyty. The existing FSR4 AppImage branch is unchanged.
+**experimental native INT8 integration in Kyty**. See
+[the AppImage setup guide](../../docs/FSR412-LINUX.md). It replays the audited
+Vulkan shader graph; it does not export AMD's Windows `ffxCreateContext` /
+`ffxDispatch` ABI. The earlier FSR4 AppImage branch remains separate.
 
 See [NATIVE-TEST.md](NATIVE-TEST.md) for the prebuilt frame-test package and the
 single-command test. The initial `native-probe` described below only reads
@@ -73,18 +74,18 @@ compute derivatives. `adapt_spirv.py` pads RGB storage-image writes to RGBA to
 satisfy the image-view component rule, preserving RGB and supplying alpha 1.
 The corresponding shader hashes and modifications are recorded separately.
 
-## What remains before integration
+## Integration status
 
-1. Extend the audited selection beyond INT8 normal-model output tier 1080p.
-   Entry-point names alone are insufficient: many variants share the same name.
-2. Compare all host constants, resource layouts, barriers and dispatch rules
-   across resolutions and models. The initializer and 29-pass order are now
-   observed for the first INT8 model; that does not validate all replay behavior.
-3. Replace or bridge the Windows CPU provider. This DLL imports MSVCP140,
-   VCRUNTIME140, Windows CRT API sets, Kernel32, VERSION and vulkan-1.dll. Renaming
-   or mechanically rewriting the file header does not implement those ABIs.
-4. Validate against AMD's output on a real GPU before connecting it to Kyty's
-   PS5 Pro input path. Never mark shader extraction as a successful upscaler.
+The four metadata recipes in `recipes/` cover both output tiers and the normal
+and Ultra Performance INT8 models. CI rechecks shader selection, initializers,
+constant buffers and dispatch rules against three newly recorded host frames.
+`recover_assets.py DLL NEW_FOLDER --all` prepares all four sets. The AppImage
+bundles the interpreter and installs them through its FSR4 setup page.
+
+Native validation and nonuniform test frames exercise all four families with
+software Vulkan. The game uses the existing PS5 Pro input path and retains FSR3
+fallback on initialization or dispatch failure. Radeon in-game visual checks,
+reference comparison, temporal stability and performance remain unverified.
 
 Format reference (including its actual numeric magic and zlib decoder):
 https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/blob/v2.4.0/Kits/FidelityFX/api/internal/ffx_blob_compression.h

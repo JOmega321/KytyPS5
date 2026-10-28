@@ -37,8 +37,10 @@ software execution is not evidence of Radeon speed or compatibility.
 
 - Official Vulkan DLL: version 4.1.2.4555, SHA-256
   `4a7e895af6e0b615d40a84d59eb8c2b1054ad91cdd0c739567940270d51bdab7`.
-- Normal INT8 model, output tier up to 1920x1080 (`t1080_m0`) only.
-  No 1440p/2160p model, Ultra Performance model, or FP8 path is included yet.
+- The single-command standalone package tests the normal INT8 1080p family.
+  The separate AppImage integration prepares all four normal/Ultra Performance
+  families through 4K; see `docs/FSR412-LINUX.md` in the repository. CI exercises
+  those four families separately. There is no FP8 path in this integration.
 - The provider's CPU setup was recorded under Wine using an explicitly synthetic
   Windows adapter identity and fake Vulkan device. Three frames each recorded
   29 dispatches, including FSR4 model kernels; the tool rejects FSR3 fallback.

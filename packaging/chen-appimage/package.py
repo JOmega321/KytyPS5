@@ -34,13 +34,15 @@ static.mkdir(parents=True, exist_ok=True)
 for source in (root / 'tools/local/static-precompile').glob('*'):
     if source.name == 'pass-states.json' or source.suffix == '.hints':
         shutil.copy2(source, static)
-shutil.copytree(root / 'tools/fsr4cap', payload / 'tools/fsr4cap', dirs_exist_ok=True)
-# Prebuilt preparation tools, isolated from the emulator and the host's Python environment.
-capture_build = root / '_Build/fsr-capture-tools'
-capture = payload / 'tools/fsr4cap/prebuilt'
-shutil.copytree(capture_build / 'bin', capture / 'bin')
-for name in ('source-revision.txt', 'source-submodules.txt', 'tool-sha256.txt', 'dxil-spirv-source.tar.gz'):
-    shutil.copy2(capture_build / name, capture / name)
+# The native Vulkan DLL is decompressed directly; no capture EXE, Proton or
+# shader translator is needed in this payload. Bundle the Python standard library.
+conversion = payload / 'tools/fsr412-vk'
+conversion.mkdir(parents=True, exist_ok=True)
+for name in ('extract_vk.py', 'adapt_spirv.py', 'recover_assets.py', 'build_assets.sh', 'host-int8-t1080-m0.json'):
+    shutil.copy2(root / 'tools/fsr412-vk' / name, conversion / name)
+shutil.copytree(root / 'tools/fsr412-vk/recipes', conversion / 'recipes')
+capture = conversion / 'prebuilt'
+(capture / 'bin').mkdir(parents=True)
 python_version = f'python{sys.version_info.major}.{sys.version_info.minor}'
 python_home = capture / 'python'
 (python_home / 'bin').mkdir(parents=True)

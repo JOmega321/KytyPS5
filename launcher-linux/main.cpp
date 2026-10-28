@@ -34,7 +34,7 @@ void Usage() {
 	    "kyty_launcher: KytyPS5's settings window for Linux\n"
 	    "  --play                 start the game with the saved settings, without the window\n"
 	    "  --lang en|zh|pt        the window's language for this run\n"
-	    "  --prepare-fsr411 DLL    open the FSR4 setup page and build assets\n"
+	    "  --prepare-fsr412 DLL    open the FSR4 setup page and build assets\n"
 	    "  --dry-run              print the scripts the buttons run\n"
 	    "  --screenshot <folder>  save each page as a picture, then exit\n");
 }
@@ -66,7 +66,7 @@ int main(int argc, char* argv[]) {
 		const std::string arg = argv[i];
 		if (arg == "--play")
 			play = true;
-		else if (arg == "--prepare-fsr411" && i + 1 < argc)
+		else if ((arg == "--prepare-fsr412" || arg == "--prepare-fsr411") && i + 1 < argc)
             prepare_dll = argv[++i];
 		else if (arg == "--dry-run")
 			dry_run = true;

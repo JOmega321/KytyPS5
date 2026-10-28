@@ -227,7 +227,7 @@ void DrawMark(Mark mark, float size) {
 
 LauncherWindow::LauncherWindow(LauncherContext& context, SDL_Renderer* renderer)
     : context_(context), commands_(context), renderer_(renderer) {
-	fsr_dll_ = S().Str("fsr4_dll");
+	fsr_dll_ = S().Str("fsr412_dll");
 	game_text_      = S().Str("game");
 	extra_text_     = S().Str("extra_args");
 	wanted_taa_     = S().Int("render") > 0 ? S().Int("render") : 1440;
@@ -803,7 +803,7 @@ void LauncherWindow::PlayPage() {
 		else
 			check(Mark::Busy, T(context_.rtx ? "dlss.noLibrary" : "dlss.noRtx"));
 		if (S().Str("upscaler") == "fsr4")
-            check(Mark::Warn, "FSR 4.1.1 requested; assets and device support are checked when the game starts");
+            check(Mark::Warn, "FSR 4.1.2 requested; assets and device support are checked when the game starts");
         else
             check(Mark::Good, T("fsr.ok"));
 	});
@@ -1043,7 +1043,7 @@ void LauncherWindow::GraphicsPage() {
 	upscalers.emplace_back("fsr");
 	upscaler_labels.emplace_back(T("upscaler.fsr"));
 	upscalers.emplace_back("fsr4");
-	upscaler_labels.emplace_back("FSR 4.1.1 INT8 (PS5 Pro path, experimental)");
+	upscaler_labels.emplace_back("FSR 4.1.2 INT8 (PS5 Pro path, experimental)");
 	// (No upscaler and no anti-aliasing: Commands' KYTY_GAME_CONVARS, issue #220.)
 	upscalers.emplace_back("off");
 	upscaler_labels.emplace_back(T("upscaler.off"));
@@ -1052,7 +1052,7 @@ void LauncherWindow::GraphicsPage() {
 	if (chosen == "fsr")
 		note = T("upscaler.fsrNote");
 	else if (chosen == "fsr4")
-		note = "Replaces Sony's upscaler through the same PS5 Pro patch as FSR 3.1. Experimental INT8 replay; generate FSR 4.1.1 assets first. Missing features/assets fall back to FSR 3.";
+		note = "Replaces Sony's upscaler through the same PS5 Pro patch as FSR 3.1. Experimental INT8 replay; generate FSR 4.1.2 assets first. Missing features/assets fall back to FSR 3.";
 	else if (chosen == "off")
 		note = T("upscaler.offNote");
 	else
@@ -1074,9 +1074,9 @@ void LauncherWindow::GraphicsPage() {
 	    note);
 
     Row("fsr4.watermark", [&] { SettingSwitch("##fsr4watermark", "fsr4_watermark", S().Str("upscaler") == "fsr4"); },
-        "Emulator status watermark: FSR 4.1.1 INT8 active, awaiting upscale, or FSR 3.1 fallback. Applies next launch.");
+        "Emulator status watermark: FSR 4.1.2 INT8 active, awaiting upscale, or FSR 3.1 fallback. Applies next launch.");
 
-    Row(nullptr, [&] { if (FlatButton("Set up FSR 4.1.1 assets...")) page_ = 7; },
+    Row(nullptr, [&] { if (FlatButton("Set up FSR 4.1.2 assets...")) page_ = 7; },
         "Choose your AMD DLL and generate the assets from the FSR4 setup page.");
 	const auto allowed  = AllowedRenderHeights();
 	const int  selected = SelectedRender();
@@ -1287,8 +1287,8 @@ void LauncherWindow::GamePage() {
 
 // ------------------------------------------------------------ FSR4 setup
 fs::path LauncherWindow::FsrAssetFolder() const {
-    if (const char* path = std::getenv("KYTY_FSR411_DIR"); path && *path) return fs::absolute(path);
-    return context_.root / "fsr4_411";
+    if (const char* path = std::getenv("KYTY_FSR412_DIR"); path && *path) return fs::absolute(path);
+    return context_.root / "fsr4_412";
 }
 void LauncherWindow::PrepareFsrAssets(const std::string& dll) {
     fsr_dll_ = dll; page_ = 7; StartFsrAssets();
@@ -1297,30 +1297,29 @@ void LauncherWindow::StartFsrAssets() {
     std::error_code error;
     const auto dll = fs::absolute(Trim(fsr_dll_)).lexically_normal();
     if (!fs::is_regular_file(dll, error)) { Message("Choose an existing AMD upscaler DLL first."); return; }
-    fs::path script = Platform::ExecutableFolder() / "tools/fsr4cap/build_assets.sh";
-    if (const char* path = std::getenv("KYTY_FSR411_BUILD_SCRIPT"); path && *path) script = path;
-    if (!fs::is_regular_file(script, error)) script = context_.root / "tools/fsr4cap/build_assets.sh";
-    if (!fs::is_regular_file(script, error)) { Message("The FSR4 capture tools are missing from this installation."); return; }
-    S().Set("fsr4_dll", dll.string()); S().Save();
-    const auto log = context_.LogsFolder() / ("fsr411-build-" + std::to_string(std::time(nullptr)) + ".log");
-    const auto work = context_.root / "out/fsr4cap";
+    fs::path script = Platform::ExecutableFolder() / "tools/fsr412-vk/build_assets.sh";
+    if (const char* path = std::getenv("KYTY_FSR412_BUILD_SCRIPT"); path && *path) script = path;
+    if (!fs::is_regular_file(script, error)) script = context_.root / "tools/fsr412-vk/build_assets.sh";
+    if (!fs::is_regular_file(script, error)) { Message("The native FSR4 extraction tools are missing from this installation."); return; }
+    S().Set("fsr412_dll", dll.string()); S().Save();
+    const auto log = context_.LogsFolder() / ("fsr412-build-" + std::to_string(std::time(nullptr)) + ".log");
     fsr_started_ = std::chrono::steady_clock::now();
-    fsr_builder_.Start({"env", "BB_FSR411_OUT=" + FsrAssetFolder().string(), "BB_FSR4CAP_WORK=" + work.string(),
-        "BB_FSR4CAP_FP8=0", "PYTHONUNBUFFERED=1", "bash", script.string(), dll.string()}, log, [] { Wake(); });
+    fsr_builder_.Start({"env", "PYTHONUNBUFFERED=1", "bash", script.string(), dll.string(),
+        FsrAssetFolder().string()}, log, [] { Wake(); });
 }
 void LauncherWindow::FsrSetupPage() {
     PageTitle("nav.fsrsetup");
     auto status = fsr_builder_.Snapshot();
-    Desc("Generate the native FSR 4.1.1 INT8 assets from your own AMD upscaler DLL. Steam and a compatible Proton are required for this one-time preparation; gameplay stays native Linux.");
+    Desc("Prepare native FSR 4.1.2 INT8 from the Vulkan DLL in AMD FSR SDK 2.4.0. Extraction and gameplay run on Linux; the AppImage includes the preparation tools.");
     Row("fsrsetup.dll", [&] {
         ImGui::BeginDisabled(status.running);
         ImGui::SetNextItemWidth(-1);
-        if (ImGui::InputTextWithHint("##fsrdll", "amd_fidelityfx_upscaler_dx12.dll (4.1.1)", &fsr_dll_)) {
-            S().Set("fsr4_dll", Trim(fsr_dll_)); Changed();
+        if (ImGui::InputTextWithHint("##fsrdll", "amd_fidelityfx_upscaler_vk.dll (4.1.2.4555)", &fsr_dll_)) {
+            S().Set("fsr412_dll", Trim(fsr_dll_)); Changed();
         }
         if (FlatButton("Choose DLL...")) PickFolder(false, false, true);
         ImGui::EndDisabled();
-    }, "The DLL is checked before capture. Missing host tools, Proton, or an incompatible DLL are explained in the build output.");
+    }, "Choose amd_fidelityfx_upscaler_vk.dll from SDK 2.4.0. Its exact version and hash are checked before extraction; other DLLs are rejected.");
     Row("fsrsetup.build", [&] {
         if (FlatButton("Build FSR4 INT8 assets", !status.running && !Trim(fsr_dll_).empty())) StartFsrAssets();
         ImGui::SameLine();
@@ -1355,7 +1354,7 @@ void LauncherWindow::FsrSetupPage() {
     bool follow = S().Bool("fsr4_log_follow");
     if (ImGui::Checkbox("Follow output", &follow)) { S().Set("fsr4_log_follow", follow); Changed(); }
     ImGui::BeginChild("##fsrbuildlog", {0, 240.0f * scale_}, ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar);
-    ImGui::TextUnformatted(status.output.empty() ? "Build output will appear here, including capture counts and any errors." : status.output.c_str());
+    ImGui::TextUnformatted(status.output.empty() ? "Preparation output will appear here, including shader and model checks and any errors." : status.output.c_str());
     if (follow) ImGui::SetScrollHereY(1.0f);
     ImGui::EndChild();
     Desc("A complete asset set does not prove GPU support or correct rendering. If the game still falls back, check its log for the reason. Closing the launcher cancels an active build.");
@@ -1626,7 +1625,7 @@ std::string LauncherWindow::Summary(std::vector<std::pair<std::string, std::stri
 	const auto res         = Times(S().Str("resolution"));
 	const bool dlss        = commands_.Dlss();
 	const auto upscaled_by =
-	    S().Str("upscaler") == "fsr4" ? std::string("FSR 4.1.1 (experimental; FSR 3 fallback)") :
+	    S().Str("upscaler") == "fsr4" ? std::string("FSR 4.1.2 INT8 selected (experimental)") :
 	    std::string(T(dlss                         ? "summary.dlss"
 	                : commands_.FsrUpscaler()      ? "summary.fsr3"
 	                : S().Str("upscaler") == "off" ? "summary.noAa"
@@ -1818,7 +1817,7 @@ void LauncherWindow::Poll() {
 		const auto chosen = Trim(picker_job_->value);
 		picker_job_       = nullptr;
 		if (!chosen.empty()) {
-			if (picker_dll_) { fsr_dll_ = chosen; S().Set("fsr4_dll", chosen); Changed(); }
+			if (picker_dll_) { fsr_dll_ = chosen; S().Set("fsr412_dll", chosen); Changed(); }
             else if (picker_cache_) {
                 S().Set("shader_cache_dir", chosen); Changed(); CheckStore(true);
             } else { game_text_ = chosen; LoadGame(chosen); }
@@ -1852,7 +1851,7 @@ void LauncherWindow::PickFolder(bool zar, bool cache, bool dll) {
 	if (const char* value = std::getenv("XDG_CURRENT_DESKTOP"); value != nullptr)
 		desktop = Lower(value);
 	const bool               kde   = desktop.find("kde") != std::string::npos;
-	const auto               title = std::string(dll ? "Choose AMD FSR 4.1.1 upscaler DLL" : cache ? "Shader cache folder" : T(zar ? "dialog.zar" : "dialog.game"));
+	const auto               title = std::string(dll ? "Choose AMD FSR 4.1.2 upscaler DLL" : cache ? "Shader cache folder" : T(zar ? "dialog.zar" : "dialog.game"));
 	std::vector<std::string> argv;
 	auto                     zenity = [&](const std::string& program) {
         argv = {program, "--file-selection", "--title=" + title,
@@ -2009,7 +2008,7 @@ void LauncherWindow::Modals() {
 	                           ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
 	                               ImGuiWindowFlags_NoMove)) {
 		ImGui::PushFont(serif_, 22.0f);
-		ImGui::TextUnformatted(picker_dll_ ? "Choose AMD FSR 4.1.1 upscaler DLL" : T(browser_zar_ ? "dialog.zar" : "dialog.game"));
+		ImGui::TextUnformatted(picker_dll_ ? "Choose AMD FSR 4.1.2 upscaler DLL" : T(browser_zar_ ? "dialog.zar" : "dialog.game"));
 		ImGui::PopFont();
 		std::error_code error;
 		fs::path        dir(browser_path_);
@@ -2055,7 +2054,7 @@ void LauncherWindow::Modals() {
 			                      ImGuiSelectableFlags_AllowDoubleClick)) {
 				browser_selected_ = path.string();
 				if (ImGui::IsMouseDoubleClicked(0)) {
-					if (picker_dll_) { fsr_dll_ = browser_selected_; S().Set("fsr4_dll", fsr_dll_); Changed(); }
+					if (picker_dll_) { fsr_dll_ = browser_selected_; S().Set("fsr412_dll", fsr_dll_); Changed(); }
                     else { game_text_ = browser_selected_; LoadGame(game_text_); }
 					ImGui::CloseCurrentPopup();
 				}
@@ -2072,7 +2071,7 @@ void LauncherWindow::Modals() {
 		ImGui::BeginDisabled(!can_choose);
 		if (ImGui::Button(T(browser_zar_ ? "picker.open" : "picker.choose"),
 		                  {200.0f * scale_, 0})) {
-			if (picker_dll_) { fsr_dll_ = browser_selected_; S().Set("fsr4_dll", fsr_dll_); Changed(); }
+			if (picker_dll_) { fsr_dll_ = browser_selected_; S().Set("fsr412_dll", fsr_dll_); Changed(); }
             else if (picker_cache_) {
                 S().Set("shader_cache_dir", dir.string()); Changed(); CheckStore(true);
             } else {

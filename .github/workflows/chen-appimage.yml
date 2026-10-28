@@ -1,7 +1,7 @@
 name: chenxiao07 AppImage
 on:
   push:
-    branches: [appimage-chenxiao07, chen-kytyps5-fsr4]
+    branches: [chen-kytyps5-fsr412-linux]
   workflow_dispatch:
 permissions:
   contents: read
@@ -17,23 +17,25 @@ jobs:
       - name: Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang lld ninja-build cmake gcc-mingw-w64-x86-64 spirv-tools python3 python3-full glslang-tools patchelf desktop-file-utils xvfb xauth fonts-dejavu-core libvulkan1 libgl1-mesa-dev libx11-dev libxcursor-dev libxext-dev libxfixes-dev libxi-dev libxrandr-dev libxss-dev libxkbcommon-dev libasound2-dev libpulse-dev libudev-dev libdbus-1-dev libwayland-dev wayland-protocols
+          sudo apt-get install -y --no-install-recommends clang lld ccache ninja-build cmake spirv-tools python3 python3-full glslang-tools patchelf desktop-file-utils xvfb xauth fonts-dejavu-core libvulkan1 libgl1-mesa-dev libx11-dev libxcursor-dev libxext-dev libxfixes-dev libxi-dev libxrandr-dev libxss-dev libxkbcommon-dev libasound2-dev libpulse-dev libudev-dev libdbus-1-dev libwayland-dev wayland-protocols
       - name: Test asset-builder process handling
         run: |
           clang++ -std=c++20 -pthread -Ilauncher-linux launcher-linux/asset-builder.cpp tests/launcher-asset-builder.cpp -o /tmp/test-asset-builder
           /tmp/test-asset-builder
-          bash -n tools/fsr4cap/build_assets.sh packaging/chen-appimage/AppRun
-      - name: Build bundled FSR4 capture tools
-        run: packaging/chen-appimage/build-capture-tools.sh
-      - name: Reuse verified unchanged native payload
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: /usr/bin/python3 packaging/chen-appimage/reuse-native.py
+          bash -n tools/fsr412-vk/build_assets.sh packaging/chen-appimage/AppRun
+          python3 tests/fsr412-vk-extract.py
+          python3 tests/fsr412-host-audit.py
+      - uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ~/.cache/ccache
+          key: native-clang-ubuntu24-${{ github.sha }}
+          restore-keys: native-clang-ubuntu24-
       - name: Configure and build native programs
-        if: env.KYTY_REUSE_NATIVE != '1'
         run: |
+          ccache --max-size 1500M
           cmake -S . -B _Build/appimage -G Ninja -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DKYTY_BUILD_LAUNCHER=OFF \
+            -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DKYTY_BUILD_LAUNCHER=OFF \
             -DCMAKE_C_FLAGS_RELEASE='-O3 -DNDEBUG -march=x86-64-v3' \
             -DCMAKE_CXX_FLAGS_RELEASE='-O3 -DNDEBUG -march=x86-64-v3 -flto=thin' \
             -DCMAKE_EXE_LINKER_FLAGS='-fuse-ld=lld -flto=thin' \
@@ -41,8 +43,11 @@ jobs:
           cmake --build _Build/appimage --target kyty_emulator kyty_launcher kyty_shader_precompile --parallel 4
           _Build/appimage/kyty_emulator --help > _Build/native-help.log
           _Build/appimage/kyty_launcher --help >> _Build/native-help.log
+      - uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ~/.cache/ccache
+          key: native-clang-ubuntu24-${{ github.sha }}
       - name: Preserve native build before packaging
-        if: env.KYTY_REUSE_NATIVE != '1'
         run: |
           git rev-parse HEAD > _Build/appimage/native-source.txt
           git submodule status --recursive > _Build/appimage/native-dependencies.txt
@@ -56,7 +61,6 @@ jobs:
           cd _Build
           sha256sum native-binaries.tar.gz > native-binaries.tar.gz.sha256
       - name: Upload native build
-        if: env.KYTY_REUSE_NATIVE != '1'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: chenxiao07-native-x86_64
@@ -114,16 +118,16 @@ jobs:
           test "$(find _Build/screenshots -name '*.bmp' | wc -l)" -ge 8
           # Exercise the actual GUI-to-builder path with a controlled dependency failure.
           mkdir -p _Build/setup-failure
-          printf '%s\n' "echo '[FSR411] Checking build tools'" "echo 'Missing tools: test dependency' >&2" 'exit 4' > _Build/mock-asset-build.sh
+          printf '%s\n' "echo '[FSR412] Checking DLL version'" "echo 'Missing tools: test dependency' >&2" 'exit 4' > _Build/mock-asset-build.sh
           printf 'not a DLL' > _Build/test.dll
-          KYTY_FSR411_BUILD_SCRIPT="$PWD/_Build/mock-asset-build.sh" APPIMAGE_EXTRACT_AND_RUN=1 SDL_VIDEODRIVER=x11 timeout 30s xvfb-run -a "$image" --prepare-fsr411 "$PWD/_Build/test.dll" --screenshot "$PWD/_Build/setup-failure" > _Build/setup-failure.log 2>&1
-          grep -q 'Missing tools: test dependency' "$XDG_DATA_HOME"/KytyPS5-chenxiao07/logs/fsr411-build-*.log
+          KYTY_FSR412_BUILD_SCRIPT="$PWD/_Build/mock-asset-build.sh" APPIMAGE_EXTRACT_AND_RUN=1 SDL_VIDEODRIVER=x11 timeout 30s xvfb-run -a "$image" --prepare-fsr412 "$PWD/_Build/test.dll" --screenshot "$PWD/_Build/setup-failure" > _Build/setup-failure.log 2>&1
+          grep -q 'Missing tools: test dependency' "$XDG_DATA_HOME"/KytyPS5-chenxiao07/logs/fsr412-build-*.log
           test -f _Build/setup-failure/8-fsrsetup.bmp
-          # The real packaged capture script must reject an invalid DLL before capture.
+          # The real packaged preparation script must reject an invalid DLL.
           status=0
-          APPIMAGE_EXTRACT_AND_RUN=1 "$image" --build-fsr411 "$PWD/_Build/test.dll" > _Build/invalid-dll.log 2>&1 || status=$?
+          APPIMAGE_EXTRACT_AND_RUN=1 "$image" --build-fsr412 "$PWD/_Build/test.dll" > _Build/invalid-dll.log 2>&1 || status=$?
           test "$status" -eq 2
-          grep -q 'Not usable:' _Build/invalid-dll.log
+          grep -q 'Preparation failed:' _Build/invalid-dll.log
           cd _Build
           "$image" --appimage-extract > /dev/null
           ./squashfs-root/AppRun --emulator --help > extracted-help.log
@@ -132,8 +136,24 @@ jobs:
           for command in bash cat chmod cp dirname env install ln mkdir mktemp mv readlink realpath rm touch true; do
             ln -s "$(type -P "$command")" "$RUNNER_TEMP/kyty-base-tools/$command"
           done
-          PATH="$RUNNER_TEMP/kyty-base-tools" ./squashfs-root/AppRun --fsr411-tools-check > bundled-tools-check.log 2>&1
-          grep -q 'Bundled translator and SPIR-V round trip: OK' bundled-tools-check.log
+          PATH="$RUNNER_TEMP/kyty-base-tools" ./squashfs-root/AppRun --fsr412-tools-check > bundled-tools-check.log 2>&1
+          grep -q 'Bundled native Vulkan asset tools: OK' bundled-tools-check.log
+          # Use the bundled interpreter to prepare every model with host Python hidden.
+          curl -fL --retry 3 -o sdk-upscaler.dll https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/v2.4.0/Kits/FidelityFX/signedbin/amd_fidelityfx_upscaler_vk.dll
+          echo '4a7e895af6e0b615d40a84d59eb8c2b1054ad91cdd0c739567940270d51bdab7  sdk-upscaler.dll' | sha256sum -c
+          PATH="$RUNNER_TEMP/kyty-base-tools" ./squashfs-root/AppRun --build-fsr412 "$PWD/sdk-upscaler.dll" > bundled-assets.json 2> bundled-assets.log
+          grep -q 'Ready: four INT8' bundled-assets.log
+          python3 - <<'PYASSETS'
+          import json, os
+          from pathlib import Path
+          root=Path(os.environ['XDG_DATA_HOME'])/'KytyPS5-chenxiao07/fsr4_412'
+          assert (root/'ASSET_VERSION').read_text().strip()=='FSR412_VULKAN_INT8_4.1.2.4555'
+          manifest=json.loads(Path('bundled-assets.json').read_text())
+          assert len(manifest['sets'])==4
+          for family in manifest['sets']:
+              assert len(list((root/family).glob('*.spv')))==29
+              assert (root/family/'initializer.bin').stat().st_size==131072
+          PYASSETS
           test -d "$XDG_DATA_HOME/KytyPS5-chenxiao07/.runtime"
       - name: Upload AppImage and checksum
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

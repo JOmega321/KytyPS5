@@ -228,9 +228,8 @@ int main(int argc,char **argv) {
     if(argc<3 || argc>6){std::fprintf(stderr,"usage: native-frame-test ASSETS NEW_OUTPUT.raw [RENDER_WxH] [OUTPUT_WxH] [FRAMES]\n");return 2;}
     uint32_t rw=320,rh=180,ow=640,oh=360;int frames=argc>5?std::atoi(argv[5]):3;
     if((argc>3 && std::sscanf(argv[3],"%ux%u",&rw,&rh)!=2) ||
-       (argc>4 && std::sscanf(argv[4],"%ux%u",&ow,&oh)!=2) || !rw || !rh || rw>ow || rh>oh || ow>1920 || oh>1080 || frames<1 || frames>8){std::fprintf(stderr,"Only the audited t1080 model, up to 8 frames, is supported\n");return 2;}
-    // The current audited asset recipe covers the normal model, not Ultra Performance.
-    if(double(ow)/rw>2.5 || double(oh)/rh>2.5){std::fprintf(stderr,"Ultra Performance is not audited yet\n");return 2;}
+       (argc>4 && std::sscanf(argv[4],"%ux%u",&ow,&oh)!=2) || !rw || !rh || rw>ow || rh>oh || ow>3840 || oh>2160 || frames<1 || frames>8){std::fprintf(stderr,"Supported output is up to 3840x2160, with 1 to 8 frames\n");return 2;}
+    if(double(ow)/rw>3.01 || double(oh)/rh>3.01){std::fprintf(stderr,"Upscale ratio exceeds the audited 3x model\n");return 2;}
     FILE *file=std::fopen(argv[2],"wbx");if(!file){std::perror("new output file");return 2;}
     setenv("BB_FSR411_VARIANT","int8",1);
     std::printf("EXPERIMENTAL native FSR 4.1.2 INT8 frame test; no AMD reference comparison yet.\n");
@@ -258,12 +257,28 @@ int main(int argc,char **argv) {
     vkCmdClearColorImage(cmd,depth.image,VK_IMAGE_LAYOUT_GENERAL,&far,1,&range);
     vkCmdClearColorImage(cmd,motion.image,VK_IMAGE_LAYOUT_GENERAL,&zero,1,&range);
     vkCmdClearColorImage(cmd,output.image,VK_IMAGE_LAYOUT_GENERAL,&sentinel,1,&range);
+    // A nonuniform deterministic color pattern exercises the neural passes instead
+    // of checking only a flat image. The same data is used for reference comparisons.
+    Buffer input=CreateHostBuffer(gpu,VkDeviceSize(rw)*rh*8,VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+    auto* color_data=static_cast<uint16_t*>(input.data);
+    for(uint32_t y=0;y<rh;y++)for(uint32_t x=0;x<rw;x++) {
+        const size_t pixel=(size_t(y)*rw+x)*4;
+        color_data[pixel]=Half(0.05f+0.9f*float(x)/float(rw));
+        color_data[pixel+1]=Half(0.05f+0.8f*float(y)/float(rh));
+        color_data[pixel+2]=Half(((x/8+y/8)%2)?0.25f:0.85f);
+        color_data[pixel+3]=Half(1.0f);
+    }
+    VkMemoryBarrier upload_barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+    upload_barrier.srcAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT;upload_barrier.dstAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT;
+    vkCmdPipelineBarrier(cmd,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_TRANSFER_BIT,0,1,&upload_barrier,0,nullptr,0,nullptr);
+    VkBufferImageCopy input_copy{};input_copy.imageSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,1};input_copy.imageExtent={rw,rh,1};
+    vkCmdCopyBufferToImage(cmd,input.buffer,color.image,VK_IMAGE_LAYOUT_GENERAL,1,&input_copy);
     VkMemoryBarrier barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};barrier.srcAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT;barrier.dstAccessMask=VK_ACCESS_SHADER_READ_BIT|VK_ACCESS_SHADER_WRITE_BIT;
     vkCmdPipelineBarrier(cmd,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,0,1,&barrier,0,nullptr,0,nullptr);submit();
     {
         Fsr411::Upscaler upscaler(gpu.physical,gpu.device,argv[1]);
         for(int i=0;i<frames;i++) {
-            CHECK(vkBeginCommandBuffer(cmd,&begin));Fsr411::Frame f;f.cmdbuf=cmd;f.color={color.image,color.view,rw,rh};f.depth={depth.image,depth.view,rw,rh};f.motion={motion.image,motion.view,rw,rh};f.output={output.image,output.view,ow,oh};f.render_width=rw;f.render_height=rh;f.jitter[0]=0.25f*float(i%4)-0.375f;f.jitter[1]=0.125f;f.sharpen=true;f.sharpness=0.5f;f.reset=i==0;f.auto_exposure=true;
+            CHECK(vkBeginCommandBuffer(cmd,&begin));Fsr411::Frame f;f.cmdbuf=cmd;f.color={color.image,color.view,rw,rh};f.depth={depth.image,depth.view,rw,rh};f.motion={motion.image,motion.view,rw,rh};f.output={output.image,output.view,ow,oh};f.render_width=rw;f.render_height=rh;f.ultra_performance=double(ow)/rw>2.5;f.jitter[0]=0.25f*float(i%4)-0.375f;f.jitter[1]=0.125f;f.sharpen=true;f.sharpness=0.5f;f.reset=i==0;f.auto_exposure=true;
             if(!upscaler.Record(f)){std::fprintf(stderr,"Native replay failed: %s\n",upscaler.Error().c_str());std::fclose(file);return 1;}
             submit();std::printf("Native Vulkan frame %d completed (%ux%u -> %ux%u)\n",i,rw,rh,ow,oh);
         }
@@ -276,15 +291,16 @@ int main(int argc,char **argv) {
     vkCmdCopyImageToBuffer(cmd,output.image,VK_IMAGE_LAYOUT_GENERAL,readback.buffer,1,&copy);
     barrier.srcAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT;barrier.dstAccessMask=VK_ACCESS_HOST_READ_BIT;
     vkCmdPipelineBarrier(cmd,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_HOST_BIT,0,1,&barrier,0,nullptr,0,nullptr);submit();
-    const auto *pixels=static_cast<const uint16_t*>(readback.data);size_t bad=0,nonzero=0,unchanged=0;
-    for(size_t i=0;i<size_t(ow)*oh*4;i++){bad+=(pixels[i]&0x7c00u)==0x7c00u;nonzero+=(pixels[i]&0x7fffu)!=0;unchanged+=pixels[i]==Half(17.0f);}
+    const auto *pixels=static_cast<const uint16_t*>(readback.data);size_t bad=0,nonzero=0,unchanged=0,rgb_nonzero=0;
+    for(size_t i=0;i<size_t(ow)*oh*4;i++){bad+=(pixels[i]&0x7c00u)==0x7c00u;nonzero+=(pixels[i]&0x7fffu)!=0;unchanged+=pixels[i]==Half(17.0f);rgb_nonzero+=(i%4!=3 && (pixels[i]&0x7fffu)!=0);}
     const bool written=std::fwrite(readback.data,1,size_t(size),file)==size_t(size);const bool closed=std::fclose(file)==0;
     std::printf("Readback: %llu bytes, nonfinite=%zu, nonzero=%zu, untouched sentinel components=%zu\n",static_cast<unsigned long long>(size),bad,nonzero,unchanged);
+    vkUnmapMemory(gpu.device,input.memory);vkDestroyBuffer(gpu.device,input.buffer,nullptr);vkFreeMemory(gpu.device,input.memory,nullptr);
     vkUnmapMemory(gpu.device,readback.memory);vkDestroyBuffer(gpu.device,readback.buffer,nullptr);vkFreeMemory(gpu.device,readback.memory,nullptr);
     for(Image *image:{&color,&depth,&motion,&output}){vkDestroyImageView(gpu.device,image->view,nullptr);vkDestroyImage(gpu.device,image->image,nullptr);vkFreeMemory(gpu.device,image->memory,nullptr);}
     vkDestroyFence(gpu.device,fence,nullptr);vkDestroyCommandPool(gpu.device,pool,nullptr);vkDestroyDevice(gpu.device,nullptr);
     if(debug_messenger){auto destroy=reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(vkGetInstanceProcAddr(gpu.instance,"vkDestroyDebugUtilsMessengerEXT"));destroy(gpu.instance,debug_messenger,nullptr);}
     vkDestroyInstance(gpu.instance,nullptr);
-    if(!written || !closed || bad || nonzero<size_t(ow)*oh || unchanged || validation_errors){std::fprintf(stderr,"Readback or validation check failed (validation errors: %u)\n",validation_errors.load());return 1;}
+    if(!written || !closed || bad || rgb_nonzero<size_t(ow)*oh || unchanged || validation_errors){std::fprintf(stderr,"Readback or validation check failed (validation errors: %u)\n",validation_errors.load());return 1;}
     std::printf("Native frame execution and readback sanity passed. Image equivalence and game integration remain unverified.\n");return 0;
 }

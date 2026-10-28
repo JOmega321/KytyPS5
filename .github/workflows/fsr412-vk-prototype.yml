@@ -78,6 +78,21 @@ jobs:
           t2160_m1 1280x720 3840x2160
           t1440_m0 1280x720 2560x1440
           CASES
+      - name: Verify all committed recipes against fresh captures and prepare assets
+        run: |
+          python3 - <<'PYRECIPES'
+          import json
+          from pathlib import Path
+          for family in ('t1080_m0','t1080_m1','t2160_m0','t2160_m1'):
+              old=json.loads((Path('tools/fsr412-vk/recipes')/(family+'.json')).read_text())
+              fresh='_Build/host-capture-'+('int8' if family=='t1080_m0' else family)+'.json'
+              new=json.loads(Path(fresh).read_text())
+              assert old['initializers']==new['initializers'], family
+              for frame,passes in old['frames'].items():
+                  assert [(x['entry'],x['sha256'],x['groups'],x['constants']) for x in passes]==[(x['entry'],x['sha256'],x['groups'],x['constants']) for x in new['frames'][frame]], family
+          PYRECIPES
+          python3 tools/fsr412-vk/recover_assets.py _Build/capture-bin/amd_fidelityfx_upscaler_vk.dll _Build/all-assets --all > _Build/all-recovery.json
+          for shader in _Build/all-assets/*/*.spv; do spirv-val --target-env vulkan1.3 "$shader"; done
       - name: Build current-enough Khronos validation layer
         run: bash tools/fsr412-vk/build-validation.sh "$PWD/_Build/validation" "$PWD/_Build/vulkan-headers"
       - name: Build and execute native frames with software Vulkan and validation
@@ -91,13 +106,22 @@ jobs:
           export VK_DRIVER_FILES="$lvp"
           export VK_LAYER_PATH="$PWD/_Build/validation/build/layers"
           export LD_LIBRARY_PATH="$PWD/_Build/validation/build/layers${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-          timeout 240 _Build/native-test/native-frame-test _Build/native-assets _Build/native-output.raw 320x180 640x360 3 2>&1 | tee _Build/native-frame-test.log
+          while read -r family render output frames; do
+            timeout 360 _Build/native-test/native-frame-test _Build/all-assets "_Build/native-$family.raw" "$render" "$output" "$frames" 2>&1 | tee "_Build/native-$family.log"
+          done <<'FRAMES'
+          t1080_m0 320x180 640x360 3
+          t1080_m1 320x180 960x540 3
+          t2160_m0 1280x720 2560x1440 1
+          t2160_m1 1280x720 3840x2160 1
+          FRAMES
+          cat _Build/native-t*.log > _Build/native-frame-test.log
       - name: Package native frame test without AMD assets
         run: |
           dist=_Build/native-test-distribution
           mkdir -p "$dist/source/tools/fsr412-vk" "$dist/source/src/local/fsr411"
           cp _Build/native-test/native-frame-test "$dist/"
           cp tools/fsr412-vk/{extract_vk.py,adapt_spirv.py,recover_assets.py,host-int8-t1080-m0.json,run-native-test.sh,NATIVE-TEST.md} "$dist/"
+          cp -r tools/fsr412-vk/recipes "$dist/"
           cp tools/fsr412-vk/{native_frame_test.cpp,build-frame-test.sh} "$dist/source/tools/fsr412-vk/"
           cp src/local/fsr411/{fsr411.cpp,fsr411.h} "$dist/source/src/local/fsr411/"
           cp LICENSE "$dist/"
@@ -117,7 +141,10 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: fsr412-host-audit
-          path: _Build/host-capture-*.json
+          path: |
+            _Build/host-capture-*.json
+            _Build/native-t*.log
+            _Build/all-recovery.json
           if-no-files-found: ignore
           retention-days: 30
   prototype:
