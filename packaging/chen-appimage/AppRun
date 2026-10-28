@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -euo pipefail
+appdir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+export KYTY_APPIMAGE_DATA_DIR="${KYTY_APPIMAGE_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/KytyPS5-chenxiao07}"
+mkdir -p -- "$KYTY_APPIMAGE_DATA_DIR"
+export KYTY_APPIMAGE_DATA_DIR="$(realpath -- "$KYTY_APPIMAGE_DATA_DIR")"
+version="$(cat "$appdir/usr/payload/version")"
+runtime="$KYTY_APPIMAGE_DATA_DIR/.runtime/$version"
+if [[ ! -f "$runtime/.complete" ]]; then
+    mkdir -p -- "$(dirname -- "$runtime")"
+    temporary="$(mktemp -d "$KYTY_APPIMAGE_DATA_DIR/.runtime/.stage-XXXXXX")"
+    trap 'rm -rf -- "$temporary"' EXIT
+    cp -a -- "$appdir/usr/payload/." "$temporary/"
+    touch "$temporary/.complete"
+    if ! mv -T -- "$temporary" "$runtime" 2>/dev/null; then
+        test -f "$runtime/.complete"
+    fi
+fi
+# A terminal launched by the GUI can outlive the AppImage process. Keep its
+# executables outside the temporary mount; retain one runtime per revision.
+for file in run_ds.sh precompile-linux.sh get-dlss-linux.sh; do
+    install -m 755 "$runtime/$file" "$KYTY_APPIMAGE_DATA_DIR/.$file.new"
+    mv -f -- "$KYTY_APPIMAGE_DATA_DIR/.$file.new" "$KYTY_APPIMAGE_DATA_DIR/$file"
+done
+for program in kyty_emulator kyty_shader_precompile; do
+    ln -sfn -- "$runtime/$program" "$KYTY_APPIMAGE_DATA_DIR/$program"
+done
+mkdir -p "$KYTY_APPIMAGE_DATA_DIR/tools/local/static-precompile"
+cp -a "$runtime/tools/local/static-precompile/." "$KYTY_APPIMAGE_DATA_DIR/tools/local/static-precompile/"
+cp -a "$runtime/dlss-bridge" "$KYTY_APPIMAGE_DATA_DIR/"
+export KYTY_DLSS_DIR="$KYTY_APPIMAGE_DATA_DIR/dlss"
+mkdir -p -- "$KYTY_DLSS_DIR"
+cd -- "$KYTY_APPIMAGE_DATA_DIR"
+case "${1:-}" in
+    --emulator) shift; exec "$runtime/kyty_emulator" "$@" ;;
+    --precompile) shift; exec "$runtime/kyty_shader_precompile" "$@" ;;
+esac
+exec "$runtime/kyty_launcher" "$@"

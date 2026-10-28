@@ -362,7 +362,9 @@ Launch Commands::GetDlss() const {
 	launch.pause     = Launch::Pause::Always;
 	launch.argv      = {context_.dlss_script.string()};
 	// (Next to the emulator, where it looks.)
-	if (!context_.emulator.empty()) {
+	if (const char* dir = std::getenv("KYTY_DLSS_DIR"); dir != nullptr && *dir != 0) {
+		launch.argv.push_back(dir);
+	} else if (!context_.emulator.empty()) {
 		std::error_code error;
 		const auto      real = fs::canonical(context_.emulator, error);
 		launch.argv.push_back((error ? context_.emulator : real).parent_path().string());

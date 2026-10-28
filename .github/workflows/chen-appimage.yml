@@ -1,0 +1,79 @@
+name: chenxiao07 AppImage
+on:
+  push:
+    branches: [appimage-chenxiao07]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  appimage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          submodules: recursive
+      - name: Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang lld ninja-build cmake glslang-tools patchelf desktop-file-utils xvfb xauth fonts-dejavu-core libvulkan1 libgl1-mesa-dev libx11-dev libxcursor-dev libxext-dev libxfixes-dev libxi-dev libxrandr-dev libxss-dev libxkbcommon-dev libasound2-dev libpulse-dev libudev-dev libdbus-1-dev libwayland-dev wayland-protocols
+      - name: Configure and build native programs
+        run: |
+          cmake -S . -B _Build/appimage -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DKYTY_BUILD_LAUNCHER=OFF \
+            -DCMAKE_C_FLAGS_RELEASE='-O3 -DNDEBUG -march=x86-64-v3' \
+            -DCMAKE_CXX_FLAGS_RELEASE='-O3 -DNDEBUG -march=x86-64-v3 -flto=thin' \
+            -DCMAKE_EXE_LINKER_FLAGS='-fuse-ld=lld -flto=thin' \
+            -DKYTY_BUILD_ORIGIN=Fork -DKYTY_BUILD_REPOSITORY="$GITHUB_REPOSITORY"
+          cmake --build _Build/appimage --target kyty_emulator kyty_launcher kyty_shader_precompile --parallel 4
+          _Build/appimage/kyty_emulator --help > _Build/native-help.log
+          _Build/appimage/kyty_launcher --help >> _Build/native-help.log
+      - name: Assemble AppDir
+        run: |
+          python3 packaging/chen-appimage/package.py _Build/appimage _Build/KytyPS5.AppDir
+          python3 packaging/chen-appimage/audit_appdir.py _Build/KytyPS5.AppDir --arch x86_64 --resolve
+          tar -C _Build -czf _Build/native-stage.tar.gz KytyPS5.AppDir
+      - name: Build AppImage
+        run: |
+          curl -fL --retry 3 -o _Build/appimagetool https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
+          echo 'ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0  _Build/appimagetool' | sha256sum -c
+          chmod +x _Build/appimagetool
+          mkdir -p _Build/output
+          ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 _Build/appimagetool _Build/KytyPS5.AppDir "_Build/output/KytyPS5-chenxiao07-${GITHUB_SHA:0:8}-x86_64.AppImage"
+          cd _Build/output
+          sha256sum *.AppImage > SHA256SUMS
+      - name: Validate final AppImage
+        run: |
+          set -euo pipefail
+          image="$(realpath _Build/output/*.AppImage)"
+          mkdir -p '_Build/smoke home'
+          export HOME="$PWD/_Build/smoke home"
+          export XDG_DATA_HOME="$HOME/data" XDG_CONFIG_HOME="$HOME/config" XDG_CACHE_HOME="$HOME/cache"
+          unset LD_LIBRARY_PATH QT_PLUGIN_PATH QT_QPA_PLATFORM_PLUGIN_PATH
+          APPIMAGE_EXTRACT_AND_RUN=1 "$image" --emulator --help > _Build/final-help.log
+          APPIMAGE_EXTRACT_AND_RUN=1 "$image" --dry-run > _Build/final-launch.log
+          APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a "$image" --screenshot "$PWD/_Build/screenshots" > _Build/final-gui.log 2>&1
+          test "$(find _Build/screenshots -name '*.bmp' | wc -l)" -ge 7
+          cd _Build
+          "$image" --appimage-extract > /dev/null
+          ./squashfs-root/AppRun --emulator --help > extracted-help.log
+          test -d "$XDG_DATA_HOME/KytyPS5-chenxiao07/.runtime"
+      - name: Upload AppImage and checksum
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: KytyPS5-chenxiao07-AppImage-x86_64
+          path: _Build/output/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload build and startup evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: chenxiao07-build-evidence
+          path: |
+            _Build/*.log
+            _Build/screenshots/
+            _Build/native-stage.tar.gz
+            _Build/appimage/CMakeCache.txt
+          if-no-files-found: ignore
+          retention-days: 7

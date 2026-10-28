@@ -242,6 +242,8 @@ bool Exists(const fs::path& path) {
 // The package folder (run_ds.sh next to the launcher) or the repository (tools/local/run_ds.sh),
 // searched from the launcher's folder up.
 fs::path FindRoot(const fs::path& start) {
+	if (const char* data = std::getenv("KYTY_APPIMAGE_DATA_DIR"); data != nullptr && *data != 0)
+		return fs::path(data);
 	for (fs::path dir = start; !dir.empty(); dir = dir.parent_path()) {
 		if (Exists(dir / "run_ds.sh") || Exists(dir / "tools" / "local" / "run_ds.sh")) return dir;
 		if (dir == dir.parent_path()) break;
