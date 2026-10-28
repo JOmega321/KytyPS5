@@ -284,7 +284,10 @@ Launch Commands::Play(const GameInfo& game, bool direct) const {
         Put(set, "KYTY_FSR4_WATERMARK", S().Bool("fsr4_watermark") ? "1" : "0");
         const bool fp8 = S().Str("fsr4_precision") == "fp8";
         Put(set, "KYTY_FSR4_PRECISION", fp8 ? "fp8" : "int8");
-        if (fp8 && S().Bool("fsr4_radv_matrix_conversions"))
+        // FP8 needs RADV's matrix-conversion extension before Vulkan starts.
+        // Derive this from the precision, including saved FP8 selections from
+        // versions where the separate toggle defaulted to off.
+        if (fp8)
             Put(set, "radv_cooperative_matrix2_nv", "true");
     }
     if (!S().Str("shader_cache_dir").empty())

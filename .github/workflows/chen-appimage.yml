@@ -1,7 +1,7 @@
 name: chenxiao07 AppImage
 on:
   push:
-    branches: [chen-kytyps5-fsr412-linux, chen-kytyps5-fsr412-fp8]
+    branches: [chen-kytyps5-fsr4-upscaler]
   workflow_dispatch:
 permissions:
   contents: read
@@ -100,13 +100,14 @@ jobs:
           chmod 700 "$XDG_RUNTIME_DIR"
           unset LD_LIBRARY_PATH QT_PLUGIN_PATH QT_QPA_PLATFORM_PLUGIN_PATH
           APPIMAGE_EXTRACT_AND_RUN=1 "$image" --emulator --help > _Build/final-help.log
+          python3 tests/launcher-fsr4-selection.py "$image"
           python3 - <<'PYSET'
           import json, os
           from pathlib import Path
           root = Path(os.environ['XDG_DATA_HOME']) / 'KytyPS5-chenxiao07'
           (root / 'launcher-settings.json').write_text(json.dumps({
               'upscaler': 'fsr4', 'fsr4_watermark': True,
-              'fsr4_precision': 'fp8', 'fsr4_radv_matrix_conversions': True,
+              'fsr4_precision': 'fp8', 'fsr4_radv_matrix_conversions': False,
               'shader_cache_dir': str(root / 'custom shader cache'),
               'shader_workers': 1, 'shader_warmup_background': False, 'precompile_jobs': 2}))
           PYSET

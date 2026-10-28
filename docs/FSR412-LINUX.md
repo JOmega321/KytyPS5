@@ -1,7 +1,6 @@
 # Experimental native FSR 4.1.2 INT8 and FP8
 
-Branch: `chen-kytyps5-fsr412-fp8`. The separate
-`chen-kytyps5-fsr412-linux` branch retains the confirmed INT8 build.
+Branch: `chen-kytyps5-fsr4-upscaler`, consolidating the INT8 and FP8 work.
 
 ## Use the AppImage
 
@@ -12,9 +11,9 @@ Branch: `chen-kytyps5-fsr412-fp8`. The separate
    Existing INT8 users need this preparation once to add the FP8 sets.
 3. In **Graphics**, select **FSR 4.1.2**, then choose **INT8** or
    **FP8 (RDNA4, experimental)** under **FSR 4 precision**.
-4. For the tested Mesa RADV / RX 9060 XT path, enable **RADV matrix conversions**.
-   This opts the game process into the driver's experimental matrix-conversion
-   extension, as used by the successful standalone FP8 hardware test.
+4. **RADV matrix conversions** is enabled automatically when FSR 4 FP8 is
+   selected. No separate toggle or Extra options entry is needed. This opts only
+   the game process into the driver's experimental matrix-conversion extension.
 5. Enable **FSR 4 status watermark** and restart the game. It reports the actual
    successful precision: FP8, INT8, INT8 because FP8 is unavailable, awaiting
    upscale, or FSR 3.1 fallback.
@@ -22,7 +21,10 @@ Branch: `chen-kytyps5-fsr412-fp8`. The separate
 INT8 remains the default. If FP8 features, assets or pipeline creation are
 unavailable, the game reports the reason and attempts FSR 4.1.2 INT8. If that is
 also unavailable, it retains the existing FSR 3.1 fallback. The launcher footer
-reports the selected option; the in-game watermark reports runtime use. The
+reports the selected option; the in-game watermark reports runtime use. Saved
+FP8 selections also enable matrix conversions even if the old toggle was off.
+INT8 and other upscalers do not enable this option. Advanced Extra options can
+still explicitly override generated launch variables. The
 legacy benchmark variable `BB_FSR411_VARIANT` cannot override the menu choice.
 
 ## Assets and preparation
@@ -70,7 +72,9 @@ ghosting than FSR 3.1. The user also ran three native standalone FP8 frames
 feature checks enabled and finite, populated readback. Khronos runtime
 validation was not requested in that hardware test. These observations do not
 establish equivalence with AMD's reference, broad game compatibility or
-performance. In-game FP8 rendering remains experimental and requires testing.
+performance. The user subsequently confirmed in-game FP8 activation after
+enabling RADV matrix conversions. Broader FP8 image quality and performance
+remain unverified.
 
 The host supplies Vulkan drivers. INT8 requires Vulkan 1.3, compute derivatives,
 integer dot products, FP16/INT8/INT16, extended storage-image formats and push

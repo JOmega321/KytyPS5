@@ -1,7 +1,7 @@
 name: FSR 4.1.2 FP8 native investigation
 on:
   push:
-    branches: [chen-kytyps5-fsr412-fp8]
+    branches: [chen-kytyps5-fsr4-upscaler]
   workflow_dispatch:
 permissions:
   contents: read

@@ -74,7 +74,7 @@ All four asset families can be prepared into a new directory with
 The standalone wrapper retains its simpler RGBA16F test. `VK_LAYER_VALIDATE_SYNC=1`
 adds synchronization validation when `FSR412_VALIDATE=1` is enabled.
 
-Full source and CI: https://github.com/JOmega321/KytyPS5/tree/chen-kytyps5-fsr412-linux
+Full source and CI: https://github.com/JOmega321/KytyPS5/tree/chen-kytyps5-fsr4-upscaler
 The exact packaged source revision is in `SOURCE_COMMIT`.
 To rebuild the frame test, provide Vulkan-Headers at commit
 `73814d006638aa00bd553215b054f0f02e457e22` and Vulkan development libraries:
