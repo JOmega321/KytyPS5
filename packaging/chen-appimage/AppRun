@@ -34,6 +34,7 @@ cd -- "$KYTY_APPIMAGE_DATA_DIR"
 export KYTY_FSR411_BUILD_SCRIPT="${KYTY_FSR411_BUILD_SCRIPT:-$runtime/tools/fsr4cap/build_assets.sh}"
 export KYTY_FSR411_DIR="${KYTY_FSR411_DIR:-$KYTY_APPIMAGE_DATA_DIR/fsr4_411}"
 case "${1:-}" in
+    --fsr411-tools-check) shift; exec bash "$runtime/tools/fsr4cap/check-tools.sh" "$@" ;;
     --build-fsr411) shift; export BB_FSR411_OUT="$KYTY_FSR411_DIR"; exec bash "$runtime/tools/fsr4cap/build_assets.sh" "$@" ;;
     --emulator) shift; exec "$runtime/kyty_emulator" "$@" ;;
     --precompile) shift; exec "$runtime/kyty_shader_precompile" "$@" ;;

@@ -120,3 +120,18 @@ is downloaded from its pinned source and built locally. DLLs and model assets ar
 not distributed. Closing the launcher cancels the owned builder process group.
 Restart the game after a successful build. Existing assets are retained until the
 new set is generated; a failed/cancelled build can be retried from the same page.
+
+## Bundled preparation tools
+
+The AppImage now includes the prebuilt `fsr4cap.exe`, pinned and patched dxil-spirv,
+SPIR-V assembler/disassembler, flock, and a private Python runtime with its standard
+library and native dependencies. The setup menu automatically uses them. No host
+compiler, MinGW, CMake, Ninja, Git, Python or SPIR-V installation is needed, and it
+no longer downloads translator source during setup. Source builds outside the
+AppImage retain the development-tool fallback.
+
+Your own AMD DLL, Steam/compatible Proton, and host Vulkan driver remain required.
+`--fsr411-tools-check` checks the bundled interpreter and native tool startup and
+performs a SPIR-V assembly/disassembly round trip without needing the GPU.
+This is separate from testing DLL capture on a real GPU. The translator's pinned
+corresponding source and notices are included under the capture tool directory.

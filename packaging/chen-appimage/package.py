@@ -31,8 +31,36 @@ for source in (root / 'tools/local/static-precompile').glob('*'):
     if source.name == 'pass-states.json' or source.suffix == '.hints':
         shutil.copy2(source, static)
 shutil.copytree(root / 'tools/fsr4cap', payload / 'tools/fsr4cap')
+# Prebuilt preparation tools, isolated from the emulator and the host's Python environment.
+capture_build = root / '_Build/fsr-capture-tools'
+capture = payload / 'tools/fsr4cap/prebuilt'
+shutil.copytree(capture_build / 'bin', capture / 'bin')
+for name in ('source-revision.txt', 'source-submodules.txt', 'tool-sha256.txt', 'dxil-spirv-source.tar.gz'):
+    shutil.copy2(capture_build / name, capture / name)
+python_version = f'python{sys.version_info.major}.{sys.version_info.minor}'
+python_home = capture / 'python'
+(python_home / 'bin').mkdir(parents=True)
+shutil.copy2(pathlib.Path(sys.executable).resolve(), python_home / 'bin' / python_version)
+stdlib = pathlib.Path('/usr/lib') / python_version
+shutil.copytree(stdlib, python_home / 'lib' / python_version,
+                ignore=shutil.ignore_patterns('__pycache__', 'test', 'tests', 'idlelib', 'tkinter', 'ensurepip', 'sitecustomize.py'))
+wrapper = capture / 'bin/python3'
+wrapper.write_text('#!/usr/bin/env bash\nset -euo pipefail\n'
+    'here="$(cd -- "$(dirname -- "$0")" && pwd)"\n'
+    'unset PYTHONPATH PYTHONSTARTUP\nexport PYTHONHOME="$here/../python"\n'
+    f'exec "$PYTHONHOME/bin/{python_version}" -s "$@"\n')
+wrapper.chmod(0o755)
+# Notices for the interpreter, standard library, SPIR-V tools, and util-linux helper.
+for name in ('python3.12', 'python3.12-minimal', 'libpython3.12-stdlib', 'libpython3.12-minimal',
+             'spirv-tools', 'util-linux', 'gcc-mingw-w64-x86-64', 'mingw-w64-common'):
+    notice = pathlib.Path('/usr/share/doc') / name / 'copyright'
+    if notice.exists():
+        target = payload / 'LICENSES/bundled-tools' / (name + '-copyright.txt')
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(notice, target)
+
 shutil.copy2(root / 'LICENSE', payload)
-shutil.copytree(root / 'LICENSES', payload / 'LICENSES')
+shutil.copytree(root / 'LICENSES', payload / 'LICENSES', dirs_exist_ok=True)
 for base in (root / '3rdparty', build / '_deps'):
     for source in base.rglob('*'):
         if (source.is_file() and source.stat().st_size < 1024 * 1024
@@ -58,7 +86,10 @@ with (payload / 'build-manifest.txt').open('a') as manifest:
 libdir = payload / 'lib'
 libdir.mkdir(exist_ok=True)
 host = re.compile(r'^(ld-linux|lib(c|m|pthread|dl|rt|resolv|util)\.so|lib(GL|EGL|GLX|GLdispatch|OpenGL|vulkan|drm|gbm))')
-pending = [payload / name for name in ('kyty_emulator', 'kyty_launcher', 'kyty_shader_precompile')]
+def is_elf(path):
+    return path.is_file() and path.open('rb').read(4) == b'\x7fELF'
+
+pending = [path for path in payload.rglob('*') if is_elf(path)]
 seen = set()
 while pending:
     elf = pending.pop()
@@ -84,8 +115,8 @@ while pending:
                     shutil.copy2(notice, payload / 'LICENSES' / (package + '-copyright.txt'))
                     break
         pending.append(target)
-for elf in [*(p for p in libdir.iterdir() if p.is_file()), *(payload / n for n in ('kyty_emulator', 'kyty_launcher', 'kyty_shader_precompile'))]:
-    rpath = '$ORIGIN' if elf.parent == libdir else '$ORIGIN/lib'
+for elf in (path for path in payload.rglob('*') if is_elf(path)):
+    rpath = '$ORIGIN/' + os.path.relpath(libdir, elf.parent)
     subprocess.run(['patchelf', '--set-rpath', rpath, str(elf)], check=True)
     subprocess.run(['strip', '--strip-unneeded', str(elf)], check=True)
 for source in ('AppRun', 'kytyps5.desktop', 'kytyps5.svg'):

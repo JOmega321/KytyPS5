@@ -16,12 +16,14 @@ jobs:
       - name: Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang lld ninja-build cmake glslang-tools patchelf desktop-file-utils xvfb xauth fonts-dejavu-core libvulkan1 libgl1-mesa-dev libx11-dev libxcursor-dev libxext-dev libxfixes-dev libxi-dev libxrandr-dev libxss-dev libxkbcommon-dev libasound2-dev libpulse-dev libudev-dev libdbus-1-dev libwayland-dev wayland-protocols
+          sudo apt-get install -y --no-install-recommends clang lld ninja-build cmake gcc-mingw-w64-x86-64 spirv-tools python3 python3-full glslang-tools patchelf desktop-file-utils xvfb xauth fonts-dejavu-core libvulkan1 libgl1-mesa-dev libx11-dev libxcursor-dev libxext-dev libxfixes-dev libxi-dev libxrandr-dev libxss-dev libxkbcommon-dev libasound2-dev libpulse-dev libudev-dev libdbus-1-dev libwayland-dev wayland-protocols
       - name: Test asset-builder process handling
         run: |
           clang++ -std=c++20 -pthread -Ilauncher-linux launcher-linux/asset-builder.cpp tests/launcher-asset-builder.cpp -o /tmp/test-asset-builder
           /tmp/test-asset-builder
           bash -n tools/fsr4cap/build_assets.sh packaging/chen-appimage/AppRun
+      - name: Build bundled FSR4 capture tools
+        run: packaging/chen-appimage/build-capture-tools.sh
       - name: Configure and build native programs
         run: |
           cmake -S . -B _Build/appimage -G Ninja -DCMAKE_BUILD_TYPE=Release \
@@ -57,7 +59,7 @@ jobs:
           retention-days: 7
       - name: Assemble AppDir
         run: |
-          python3 packaging/chen-appimage/package.py _Build/appimage _Build/KytyPS5.AppDir
+          /usr/bin/python3 packaging/chen-appimage/package.py _Build/appimage _Build/KytyPS5.AppDir
           python3 packaging/chen-appimage/audit_appdir.py _Build/KytyPS5.AppDir --arch x86_64 --resolve
           tar -C _Build -czf _Build/native-stage.tar.gz KytyPS5.AppDir
       - name: Build AppImage
@@ -117,6 +119,13 @@ jobs:
           cd _Build
           "$image" --appimage-extract > /dev/null
           ./squashfs-root/AppRun --emulator --help > extracted-help.log
+          # Hide development tools and host Python; exercise the bundled helpers after relocation.
+          mkdir -p "$RUNNER_TEMP/kyty-base-tools"
+          for command in bash cat chmod cp dirname env install ln mkdir mktemp mv readlink realpath rm touch true; do
+            ln -s "$(command -v "$command")" "$RUNNER_TEMP/kyty-base-tools/$command"
+          done
+          PATH="$RUNNER_TEMP/kyty-base-tools" ./squashfs-root/AppRun --fsr411-tools-check > bundled-tools-check.log 2>&1
+          grep -q 'Bundled translator and SPIR-V round trip: OK' bundled-tools-check.log
           test -d "$XDG_DATA_HOME/KytyPS5-chenxiao07/.runtime"
       - name: Upload AppImage and checksum
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

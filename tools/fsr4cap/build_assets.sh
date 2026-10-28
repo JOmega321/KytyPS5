@@ -38,6 +38,13 @@ work=$(realpath -m "${BB_FSR4CAP_WORK:-$root/out/fsr4cap}")
 out=$(realpath -m "${BB_FSR411_OUT:-$root/fsr4_411}")
 tools=${BB_FSR4CAP_TOOLS:-}
 python=${PYTHON:-python3}
+if [[ -x $here/prebuilt/bin/dxil-spirv ]]; then
+    tools=$here/prebuilt/bin
+    export BB_FSR4CAP_TOOLS="$tools"
+    export PATH="$tools:$PATH"
+    python=$tools/python3
+    echo "[FSR411] Using bundled capture, Python and SPIR-V tools"
+fi
 
 # Before anything long: is it a DLL bbport can replay, and where is its loader? (Without Python
 # yet, after nix-shell below.)
