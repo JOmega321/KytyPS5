@@ -54,7 +54,9 @@ def analyze(root, dll):
             if e['pipeline'] not in pipelines or len(e['groups']) != 3 or any(not isinstance(x, int) or x < 1 for x in e['groups']):
                 raise ValueError('invalid dispatch or missing pipeline')
             pipeline = pipelines[e['pipeline']]
-            recorded = {'entry': pipeline['entry'], 'sha256': pipeline['sha256'], 'groups': e['groups'], 'constants': {}}
+            recorded = {'entry': pipeline['entry'], 'sha256': pipeline['sha256'], 'groups': e['groups'], 'constants': {},
+                        'shader_capabilities': pipeline['reflection']['capabilities'],
+                        'shader_extensions': pipeline['reflection']['extensions']}
             frames[e['frame']].append(recorded)
             bindings = {(b['set'], b['binding']): b for b in e['bindings']}
             if len(bindings) != len(e['bindings']):
@@ -92,6 +94,8 @@ def analyze(root, dll):
     for number, dispatches in frames.items():
         if not any(x['entry'].startswith('fsr4_model_') for x in dispatches):
             raise ValueError(f'frame {number} contains no FSR4 model dispatch; refusing fallback')
+    if profile['fp8'] and not any(4213 in p['reflection']['capabilities'] and 6022 in p['reflection']['capabilities'] for p in pipelines.values()):
+        raise ValueError('FP8 profile selected no native float8 matrix shaders; refusing mislabeled fallback')
     if not initializers:
         raise ValueError('no initializer binding observed')
     return {'format_version': 1, 'dll_sha256': hashlib.sha256(dll).hexdigest(),

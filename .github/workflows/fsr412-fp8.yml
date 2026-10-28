@@ -1,0 +1,59 @@
+name: FSR 4.1.2 FP8 native investigation
+on:
+  push:
+    branches: [chen-kytyps5-fsr412-fp8]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Install offline recorder toolchain
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends wine64 gcc-mingw-w64-x86-64-posix
+      - name: Build recorder and obtain verified SDK input
+        run: |
+          git clone https://github.com/KhronosGroup/Vulkan-Headers.git _Build/headers
+          git -C _Build/headers checkout 73814d006638aa00bd553215b054f0f02e457e22
+          bash tools/fsr412-vk/build-capture.sh "$PWD/_Build/bin" "$PWD/_Build/headers/include"
+          curl -fL --retry 3 -o _Build/bin/upscaler.dll https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/v2.4.0/Kits/FidelityFX/signedbin/amd_fidelityfx_upscaler_vk.dll
+          echo '4a7e895af6e0b615d40a84d59eb8c2b1054ad91cdd0c739567940270d51bdab7  _Build/bin/upscaler.dll' | sha256sum -c
+      - name: Record FP8 provider decisions without GPU execution
+        env:
+          WINEDEBUG: '-all'
+          WINEARCH: win64
+          WINEDLLOVERRIDES: 'vulkan-1=n;mscoree,mshtml='
+        run: |
+          export WINEPREFIX="$PWD/_Build/wine-prefix"
+          root="$PWD"
+          while read -r family render output; do
+            mkdir -p "$root/_Build/capture-$family"
+            cd "$root/_Build/capture-$family"
+            timeout 120 /usr/lib/wine/wine64 "$root/_Build/bin/capture.exe" "Z:$root/_Build/bin/upscaler.dll" fp8 "$render" "$output" 3
+            cd "$root"
+            python3 tools/fsr412-vk/analyze_capture.py "_Build/capture-$family" _Build/bin/upscaler.dll "_Build/fp8-$family.json"
+          done <<'CASES'
+          t1080_m0 1280x720 1920x1080
+          t1080_m1 640x360 1920x1080
+          t2160_m0 2560x1440 3840x2160
+          t2160_m1 1280x720 3840x2160
+          t1440_m0 1280x720 2560x1440
+          CASES
+      - name: Show recorder diagnostics without AMD byte data
+        if: always()
+        run: |
+          for trace in _Build/capture-*/trace.jsonl; do
+            test -f "$trace" || continue
+            head -n 35 "$trace"
+            tail -n 5 "$trace"
+          done
+      - name: Upload metadata only
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: fsr412-fp8-host-audit
+          path: _Build/fp8-*.json
+          if-no-files-found: ignore
+          retention-days: 30

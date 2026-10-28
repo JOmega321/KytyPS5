@@ -107,6 +107,18 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceFeatures2(VkPhysicalDevice d,VkPhy
         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_FEATURES: { VkPhysicalDeviceSubgroupSizeControlFeatures *v=(void*)s;v->subgroupSizeControl=v->computeFullSubgroups=1;break; }
         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT8_FEATURES_EXT: { VkPhysicalDeviceShaderFloat8FeaturesEXT *v=(void*)s;v->shaderFloat8=v->shaderFloat8CooperativeMatrix=fp8;break; }
         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR: { VkPhysicalDeviceCooperativeMatrixFeaturesKHR *v=(void*)s;v->cooperativeMatrix=v->cooperativeMatrixRobustBufferAccess=fp8;break; }
+        case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_2_FEATURES_NV: {
+            VkPhysicalDeviceCooperativeMatrix2FeaturesNV *v=(void*)s;
+            v->cooperativeMatrixConversions=fp8;break; }
+        case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES: {
+            VkPhysicalDeviceVulkanMemoryModelFeatures *v=(void*)s;
+            v->vulkanMemoryModel=v->vulkanMemoryModelDeviceScope=fp8;break; }
+        case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VARIABLE_POINTERS_FEATURES: {
+            VkPhysicalDeviceVariablePointersFeatures *v=(void*)s;
+            v->variablePointersStorageBuffer=v->variablePointers=fp8;break; }
+        case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES: {
+            VkPhysicalDevice16BitStorageFeatures *v=(void*)s;
+            v->storageBuffer16BitAccess=v->uniformAndStorageBuffer16BitAccess=fp8;break; }
         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_MIXED_FLOAT_DOT_PRODUCT_FEATURES_VALVE: { VkPhysicalDeviceShaderMixedFloatDotProductFeaturesVALVE *v=(void*)s;v->shaderMixedFloatDotProductFloat16AccFloat32=v->shaderMixedFloatDotProductFloat16AccFloat16=1;v->shaderMixedFloatDotProductFloat8AccFloat32=fp8;break; }
         default: LOG("{\"op\":\"unsupported_feature\",\"type\":%u}\n",s->sType);break;
         }
@@ -120,9 +132,9 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceMemoryProperties(VkPhysicalDevice 
     p->memoryTypes[1].propertyFlags=VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT|VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
     p->memoryHeapCount=1;p->memoryHeaps[0].size=8ull<<30;p->memoryHeaps[0].flags=VK_MEMORY_HEAP_DEVICE_LOCAL_BIT;
 }
-static const char *extensions[]={"VK_EXT_subgroup_size_control","VK_KHR_shader_float16_int8","VK_KHR_shader_integer_dot_product","VK_KHR_compute_shader_derivatives","VK_VALVE_shader_mixed_float_dot_product","VK_KHR_storage_buffer_storage_class","VK_KHR_16bit_storage","VK_KHR_8bit_storage","VK_KHR_maintenance1","VK_KHR_maintenance2","VK_EXT_shader_float8","VK_KHR_cooperative_matrix"};
+static const char *extensions[]={"VK_EXT_subgroup_size_control","VK_KHR_shader_float16_int8","VK_KHR_shader_integer_dot_product","VK_KHR_compute_shader_derivatives","VK_VALVE_shader_mixed_float_dot_product","VK_KHR_storage_buffer_storage_class","VK_KHR_16bit_storage","VK_KHR_8bit_storage","VK_KHR_maintenance1","VK_KHR_maintenance2","VK_EXT_shader_float8","VK_KHR_cooperative_matrix","VK_NV_cooperative_matrix2"};
 VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(VkPhysicalDevice d,const char *layer,uint32_t *n,VkExtensionProperties *p) {
-    (void)d;(void)layer;uint32_t count=(uint32_t)(sizeof(extensions)/sizeof(*extensions))-(fp8?0:2);
+    (void)d;(void)layer;uint32_t count=(uint32_t)(sizeof(extensions)/sizeof(*extensions))-(fp8?0:3);
     if(!p){*n=count;return VK_SUCCESS;}uint32_t used=*n<count?*n:count;for(uint32_t i=0;i<used;i++){memset(p+i,0,sizeof(*p));strcpy(p[i].extensionName,extensions[i]);p[i].specVersion=1;}*n=used;return used<count?VK_INCOMPLETE:VK_SUCCESS;
 }
 

@@ -15,14 +15,15 @@ __declspec(dllimport) void capNote(VkImage,const char*);
 // The provider also asks Windows GDI for AMD ASIC family/revision. Redirect ONLY
 // these two hardware queries inside the inspected DLL to our synthetic profile.
 // No AMD instructions or files are patched; this is host-call instrumentation.
+static int use_fp8;
 static LONG WINAPI enum_adapters(void *out) {
     unsigned char *p=out;memset(p,0,324);*(uint32_t*)p=1;*(uint32_t*)(p+4)=1;memset(p+8,3,8);return 0;
 }
 static LONG WINAPI adapter_info(void *query) {
     unsigned char *p=query;void *data=*(void**)(p+8);uint32_t size=*(uint32_t*)(p+16);
     if(*(uint32_t*)(p+4)!=0 || size<0x38 || size>0x100000 || !data)return (LONG)0xc000000d;
-    memset(data,0,size);*(uint32_t*)((unsigned char*)data+0x30)=0x91;*(uint32_t*)((unsigned char*)data+0x34)=1;
-    printf("SIMULATED Windows ASIC query: family=145 revision=1 (no physical GPU)\n");return 0;
+    memset(data,0,size);*(uint32_t*)((unsigned char*)data+0x30)=use_fp8?0x98:0x91;*(uint32_t*)((unsigned char*)data+0x34)=1;
+    printf("SIMULATED Windows ASIC query: family=%u revision=1 (no physical GPU)\n",use_fp8?152:145);return 0;
 }
 static FARPROC WINAPI lookup(HMODULE module,LPCSTR name) {
     if((uintptr_t)name>65535) {
@@ -63,8 +64,8 @@ int main(int argc,char **argv) {
     if(argc!=6){fprintf(stderr,"usage: capture.exe DLL int8|fp8 RENDER_WxH OUTPUT_WxH FRAMES\nRun in a NEW empty working directory. NO GPU execution.\n");return 2;}
     uint32_t rw=0,rh=0,ow=0,oh=0;int frames=atoi(argv[5]);
     if((strcmp(argv[2],"int8") && strcmp(argv[2],"fp8")) || sscanf(argv[3],"%ux%u",&rw,&rh)!=2 || sscanf(argv[4],"%ux%u",&ow,&oh)!=2 || !rw || !rh || rw>ow || rh>oh || ow>4096 || oh>4096 || frames<1 || frames>16)return 2;
-    if(!strcmp(argv[2],"fp8")){fprintf(stderr,"FP8 ASIC profile is not implemented; refusing mislabeled capture\n");return 2;}
-    capProfile(0);
+    use_fp8=!strcmp(argv[2],"fp8");
+    capProfile(use_fp8);
     printf("OFFLINE synthetic device; no GPU execution.\n");
     HMODULE dll=LoadLibraryExA(argv[1],NULL,LOAD_WITH_ALTERED_SEARCH_PATH);if(!dll){fprintf(stderr,"DLL load failed: %lu\n",GetLastError());return 1;}
     if(!instrument_adapter_queries(dll)){fprintf(stderr,"Cannot instrument synthetic adapter queries\n");return 1;}
