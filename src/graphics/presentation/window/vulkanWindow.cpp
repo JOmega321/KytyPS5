@@ -942,6 +942,13 @@ static vk::Device VulkanCreateDevice(vk::PhysicalDevice physical_device, const V
     // SDK 2.4's native Vulkan INT8 programs use KHR integer dot products,
     // not the VALVE mixed-float-dot instructions emitted by the DXIL translator.
     vk::PhysicalDeviceComputeShaderDerivativesFeaturesKHR fsr_derivatives{};
+    vk::PhysicalDeviceShaderFloat8FeaturesEXT fsr_float8{};
+    vk::PhysicalDeviceCooperativeMatrixFeaturesKHR fsr_matrix{};
+    vk::PhysicalDeviceCooperativeMatrix2FeaturesNV fsr_matrix2{};
+    vk::PhysicalDeviceVariablePointersFeatures fsr_pointers{};
+    vk::PhysicalDevice16BitStorageFeatures fsr_storage16{};
+    const char* precision = std::getenv("KYTY_FSR4_PRECISION");
+    const bool fp8_requested = precision && std::string_view(precision) == "fp8";
     const char* fsr_choice = std::getenv("KYTY_UPSCALER");
     const bool fsr_extensions = fsr_choice && std::string_view(fsr_choice) == "fsr4" &&
         HasExtension(device_extensions, "VK_KHR_compute_shader_derivatives") &&
@@ -950,17 +957,45 @@ static vk::Device VulkanCreateDevice(vk::PhysicalDevice physical_device, const V
         fsr_derivatives.pNext = supported_features2.pNext;
         supported_features2.pNext = &fsr_derivatives;
     }
+    const bool fp8_extensions = fp8_requested && fsr_extensions &&
+        HasExtension(device_extensions, "VK_EXT_shader_float8") &&
+        HasExtension(device_extensions, "VK_KHR_cooperative_matrix") &&
+        HasExtension(device_extensions, "VK_NV_cooperative_matrix2");
+    if (fp8_extensions) {
+        fsr_float8.pNext = supported_features2.pNext;
+        fsr_matrix.pNext = &fsr_float8;
+        fsr_matrix2.pNext = &fsr_matrix;
+        fsr_pointers.pNext = &fsr_matrix2;
+        fsr_storage16.pNext = &fsr_pointers;
+        supported_features2.pNext = &fsr_storage16;
+    }
 	physical_device.getFeatures2(&supported_features2);
     graphics.fsr412_enabled = fsr_extensions && fsr_derivatives.computeDerivativeGroupLinear &&
         supported_features12.shaderFloat16 && supported_features12.shaderInt8 &&
         supported_features13.shaderIntegerDotProduct && supported_features2.features.shaderInt16 &&
         supported_features2.features.shaderStorageImageExtendedFormats;
+    graphics.fsr412_fp8_enabled = graphics.fsr412_enabled && fp8_extensions &&
+        fsr_float8.shaderFloat8 && fsr_float8.shaderFloat8CooperativeMatrix &&
+        fsr_matrix.cooperativeMatrix && fsr_matrix2.cooperativeMatrixConversions &&
+        fsr_pointers.variablePointers && fsr_pointers.variablePointersStorageBuffer &&
+        fsr_storage16.storageBuffer16BitAccess && supported_features12.vulkanMemoryModel &&
+        supported_features13.subgroupSizeControl && supported_features13.computeFullSubgroups &&
+        graphics.min_subgroup_size <= 32 && graphics.max_subgroup_size >= 32 &&
+        bool(graphics.required_subgroup_size_stages & vk::ShaderStageFlagBits::eCompute);
+    if (fp8_requested)
+        std::printf("FSR 4.1.2 FP8 device: extensions=%u float8=%u matrixFloat8=%u matrix=%u conversions=%u pointers=%u storage16=%u memoryModel=%u sizeControl=%u fullSubgroups=%u enabled=%u\n",
+            unsigned(fp8_extensions), unsigned(fsr_float8.shaderFloat8), unsigned(fsr_float8.shaderFloat8CooperativeMatrix),
+            unsigned(fsr_matrix.cooperativeMatrix), unsigned(fsr_matrix2.cooperativeMatrixConversions),
+            unsigned(fsr_pointers.variablePointers), unsigned(fsr_storage16.storageBuffer16BitAccess),
+            unsigned(supported_features12.vulkanMemoryModel), unsigned(supported_features13.subgroupSizeControl),
+            unsigned(supported_features13.computeFullSubgroups), unsigned(graphics.fsr412_fp8_enabled));
     if (fsr_choice && std::string_view(fsr_choice) == "fsr4")
         std::printf("FSR 4.1.2 Vulkan INT8 device: extensions=%u derivativesLinear=%u float16=%u int8=%u int16=%u integerDot=%u storageExtended=%u enabled=%u\n",
             unsigned(fsr_extensions), unsigned(fsr_derivatives.computeDerivativeGroupLinear),
             unsigned(supported_features12.shaderFloat16), unsigned(supported_features12.shaderInt8),
             unsigned(supported_features2.features.shaderInt16), unsigned(supported_features13.shaderIntegerDotProduct),
             unsigned(supported_features2.features.shaderStorageImageExtendedFormats), unsigned(graphics.fsr412_enabled));
+    if (graphics.fsr412_fp8_enabled) features12.vulkanMemoryModel = VK_TRUE;
     if (graphics.fsr412_enabled) {
         features12.shaderFloat16 = VK_TRUE;
         features12.shaderInt8 = VK_TRUE;
@@ -1115,7 +1150,8 @@ static vk::Device VulkanCreateDevice(vk::PhysicalDevice physical_device, const V
         device_features.shaderInt16 = VK_TRUE;
         device_features.shaderStorageImageExtendedFormats = VK_TRUE;
     }
-	features13.subgroupSizeControl = subgroup_size_control_enabled ? VK_TRUE : VK_FALSE;
+	features13.subgroupSizeControl = (subgroup_size_control_enabled || graphics.fsr412_fp8_enabled) ? VK_TRUE : VK_FALSE;
+    if (graphics.fsr412_fp8_enabled) features13.computeFullSubgroups = VK_TRUE;
 	features13.pipelineCreationCacheControl = supported_features13.pipelineCreationCacheControl;
 	graphics.pipeline_cache_control_enabled = features13.pipelineCreationCacheControl == VK_TRUE;
 
@@ -1209,6 +1245,22 @@ static vk::Device VulkanCreateDevice(vk::PhysicalDevice physical_device, const V
         fsr_derivatives.pNext = const_cast<void*>(create_info.pNext);
         fsr_derivatives.computeDerivativeGroupQuads = VK_FALSE;
         create_info.pNext = &fsr_derivatives;
+    }
+    if (graphics.fsr412_fp8_enabled) {
+        fsr_float8.shaderFloat8 = fsr_float8.shaderFloat8CooperativeMatrix = VK_TRUE;
+        fsr_matrix.cooperativeMatrix = VK_TRUE;
+        fsr_matrix.cooperativeMatrixRobustBufferAccess = VK_FALSE;
+        fsr_matrix2 = vk::PhysicalDeviceCooperativeMatrix2FeaturesNV{};
+        fsr_matrix2.cooperativeMatrixConversions = VK_TRUE;
+        fsr_pointers.variablePointers = fsr_pointers.variablePointersStorageBuffer = VK_TRUE;
+        fsr_storage16 = vk::PhysicalDevice16BitStorageFeatures{};
+        fsr_storage16.storageBuffer16BitAccess = VK_TRUE;
+        fsr_float8.pNext = const_cast<void*>(create_info.pNext);
+        fsr_matrix.pNext = &fsr_float8;
+        fsr_matrix2.pNext = &fsr_matrix;
+        fsr_pointers.pNext = &fsr_matrix2;
+        fsr_storage16.pNext = &fsr_pointers;
+        create_info.pNext = &fsr_storage16;
     }
 	AntiLag::ChainFeature(physical_device, device_extensions, create_info, anti_lag);
 	// (Frame generation's device creation reserves host address space below 1 TiB: the range kept free for it, issue #45.)
@@ -1709,6 +1761,10 @@ void WindowContext::CreateVulkan() {
         if (const char* selected = std::getenv("KYTY_UPSCALER"); selected && std::string_view(selected) == "fsr4") {
             for (const char* extension : {"VK_KHR_compute_shader_derivatives"})
                 if (HasExtension(available_extensions, extension)) device_extensions.push_back(extension);
+            if (const char* precision = std::getenv("KYTY_FSR4_PRECISION"); precision && std::string_view(precision) == "fp8") {
+                for (const char* extension : {"VK_EXT_shader_float8", "VK_KHR_cooperative_matrix", "VK_NV_cooperative_matrix2"})
+                    if (HasExtension(available_extensions, extension)) device_extensions.push_back(extension);
+            }
         }
 		AntiLag::AddDeviceExtension(available_extensions, device_extensions); // (KYTY_LOW_LATENCY)
 		// KYTY_PIPELINE_STATS=<hash,...> (diagnostic): the driver's statistics of those compute programs' pipelines
@@ -1932,6 +1988,10 @@ bool CreateHeadlessGraphicContext(GraphicContext& graphic_ctx) {
         if (const char* selected = std::getenv("KYTY_UPSCALER"); selected && std::string_view(selected) == "fsr4") {
             for (const char* extension : {"VK_KHR_compute_shader_derivatives"})
                 if (HasExtension(available_extensions, extension)) device_extensions.push_back(extension);
+            if (const char* precision = std::getenv("KYTY_FSR4_PRECISION"); precision && std::string_view(precision) == "fp8") {
+                for (const char* extension : {"VK_EXT_shader_float8", "VK_KHR_cooperative_matrix", "VK_NV_cooperative_matrix2"})
+                    if (HasExtension(available_extensions, extension)) device_extensions.push_back(extension);
+            }
         }
 	}
 #if !defined(__APPLE__)

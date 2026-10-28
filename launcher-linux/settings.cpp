@@ -53,6 +53,8 @@ const nlohmann::ordered_json& Defaults() {
         d["fsr4_dll"] = ""; // Legacy 4.1.1 selection is preserved.
         d["fsr412_dll"] = "";
         d["fsr4_watermark"] = false;
+        d["fsr4_precision"] = "int8";
+        d["fsr4_radv_matrix_conversions"] = false;
         d["shader_cache_dir"] = "";
         d["shader_workers"] = 0;
         d["shader_warmup_background"] = true;

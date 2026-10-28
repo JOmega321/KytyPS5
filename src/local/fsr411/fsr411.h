@@ -36,6 +36,8 @@ struct Features {
     /// The same with FP16 instead of FP8 matrices: the FP8 variant emulated (fp8emu, testing only:
     /// BB_FSR411_VARIANT=fp8emu).
     bool fp16_matrices = false;
+    /// The application precision selector overrides the legacy benchmark environment.
+    bool explicit_precision = false;
 };
 
 struct Frame {

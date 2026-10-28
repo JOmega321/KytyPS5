@@ -21,12 +21,13 @@ AssetBuilder::Status AssetBuilder::Snapshot() const {
     std::lock_guard lock(mutex_);
     return status_;
 }
-bool AssetBuilder::Installed(const std::filesystem::path& directory) {
+namespace {
+bool CompleteAssets(const std::filesystem::path& directory, const char* expected) {
     std::ifstream marker(directory / "ASSET_VERSION");
     std::string version;
     std::getline(marker, version);
-    if (version != "FSR412_VULKAN_INT8_4.1.2.4555") return false;
-    // A complete INT8 set for both output tiers and quality model families.
+    if (version != expected) return false;
+    // A complete precision set for both output tiers and quality model families.
     static const char* passes[] = {"spd", "prepass", "pass0_post", "pass1", "pass1_post", "pass2", "pass2_post",
         "pass3", "pass3_post", "pass4", "pass4_post", "pass5", "pass5_post", "pass6", "pass6_post", "pass7",
         "pass7_post", "pass8", "pass8_post", "pass9", "pass9_post", "pass10", "pass10_post", "pass11",
@@ -43,6 +44,13 @@ bool AssetBuilder::Installed(const std::filesystem::path& directory) {
         }
     }
     return true;
+}
+} // namespace
+bool AssetBuilder::Installed(const std::filesystem::path& directory) {
+    return CompleteAssets(directory, "FSR412_VULKAN_INT8_4.1.2.4555");
+}
+bool AssetBuilder::InstalledFp8(const std::filesystem::path& directory) {
+    return CompleteAssets(directory / "fp8", "FSR412_VULKAN_FP8_4.1.2.4555");
 }
 bool AssetBuilder::Start(std::vector<std::string> argv, std::filesystem::path log, std::function<void()> wake) {
     if (Snapshot().running || argv.empty()) return false;

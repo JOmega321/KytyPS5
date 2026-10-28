@@ -1043,7 +1043,7 @@ void LauncherWindow::GraphicsPage() {
 	upscalers.emplace_back("fsr");
 	upscaler_labels.emplace_back(T("upscaler.fsr"));
 	upscalers.emplace_back("fsr4");
-	upscaler_labels.emplace_back("FSR 4.1.2 INT8 (PS5 Pro path, experimental)");
+	upscaler_labels.emplace_back("FSR 4.1.2 (PS5 Pro path, experimental)");
 	// (No upscaler and no anti-aliasing: Commands' KYTY_GAME_CONVARS, issue #220.)
 	upscalers.emplace_back("off");
 	upscaler_labels.emplace_back(T("upscaler.off"));
@@ -1052,7 +1052,7 @@ void LauncherWindow::GraphicsPage() {
 	if (chosen == "fsr")
 		note = T("upscaler.fsrNote");
 	else if (chosen == "fsr4")
-		note = "Replaces Sony's upscaler through the same PS5 Pro patch as FSR 3.1. Experimental INT8 replay; generate FSR 4.1.2 assets first. Missing features/assets fall back to FSR 3.";
+		note = "Replaces Sony's upscaler through the same PS5 Pro patch as FSR 3.1. Select INT8 or experimental FP8 below and prepare assets in FSR4 setup. FP8 failures use INT8 where possible; unavailable FSR4 falls back to FSR 3.";
 	else if (chosen == "off")
 		note = T("upscaler.offNote");
 	else
@@ -1073,8 +1073,20 @@ void LauncherWindow::GraphicsPage() {
 	    },
 	    note);
 
+    Row("fsr4.precision", [&] {
+        const std::vector<std::string> labels {"INT8", "FP8 (RDNA4, experimental)"};
+        int index = S().Str("fsr4_precision") == "fp8" ? 1 : 0;
+        ImGui::BeginDisabled(S().Str("upscaler") != "fsr4");
+        if (Combo("##fsr4precision", &index, labels, 300)) {
+            S().Set("fsr4_precision", index == 1 ? "fp8" : "int8"); Changed();
+        }
+        ImGui::EndDisabled();
+    }, "FP8 uses native float8 matrix multiplication with FP16/FP32 compatibility staging. Unsupported FP8 features/assets fall back to INT8; the watermark reports the active precision. Applies next launch.");
+    Row("fsr4.radv", [&] {
+        SettingSwitch("##fsr4radv", "fsr4_radv_matrix_conversions", S().Str("upscaler") == "fsr4" && S().Str("fsr4_precision") == "fp8");
+    }, "For Mesa RADV: expose its experimental matrix-conversion extension for the game process. Required for the tested RX 9060 XT FP8 path. Applies next launch.");
     Row("fsr4.watermark", [&] { SettingSwitch("##fsr4watermark", "fsr4_watermark", S().Str("upscaler") == "fsr4"); },
-        "Emulator status watermark: FSR 4.1.2 INT8 active, awaiting upscale, or FSR 3.1 fallback. Applies next launch.");
+        "Emulator status watermark: active FP8/INT8, INT8 when FP8 is unavailable, awaiting upscale, or FSR 3.1 fallback. Applies next launch.");
 
     Row(nullptr, [&] { if (FlatButton("Set up FSR 4.1.2 assets...")) page_ = 7; },
         "Choose your AMD DLL and generate the assets from the FSR4 setup page.");
@@ -1310,7 +1322,7 @@ void LauncherWindow::StartFsrAssets() {
 void LauncherWindow::FsrSetupPage() {
     PageTitle("nav.fsrsetup");
     auto status = fsr_builder_.Snapshot();
-    Desc("Prepare native FSR 4.1.2 INT8 from the Vulkan DLL in AMD FSR SDK 2.4.0. Extraction and gameplay run on Linux; the AppImage includes the preparation tools.");
+    Desc("Prepare native FSR 4.1.2 INT8 and FP8 from the Vulkan DLL in AMD FSR SDK 2.4.0. Extraction and gameplay run on Linux; the AppImage includes the preparation tools.");
     Row("fsrsetup.dll", [&] {
         ImGui::BeginDisabled(status.running);
         ImGui::SetNextItemWidth(-1);
@@ -1321,7 +1333,7 @@ void LauncherWindow::FsrSetupPage() {
         ImGui::EndDisabled();
     }, "Choose amd_fidelityfx_upscaler_vk.dll from SDK 2.4.0. Its exact version and hash are checked before extraction; other DLLs are rejected.");
     Row("fsrsetup.build", [&] {
-        if (FlatButton("Build FSR4 INT8 assets", !status.running && !Trim(fsr_dll_).empty())) StartFsrAssets();
+        if (FlatButton("Build FSR4 INT8 + FP8 assets", !status.running && !Trim(fsr_dll_).empty())) StartFsrAssets();
         ImGui::SameLine();
         if (FlatButton("Cancel", status.running)) fsr_builder_.Cancel();
     });
@@ -1334,16 +1346,19 @@ void LauncherWindow::FsrSetupPage() {
     }
     static auto checked = std::chrono::steady_clock::time_point{};
     static fs::path checked_path;
-    static bool installed = false;
+    static bool installed = false, installed_fp8 = false;
     static bool was_running = false;
     const auto now = std::chrono::steady_clock::now();
     if (checked_path != FsrAssetFolder() || (was_running && !status.running) || now - checked > std::chrono::seconds(1)) {
-        checked_path = FsrAssetFolder(); installed = AssetBuilder::Installed(checked_path); checked = now;
+        checked_path = FsrAssetFolder(); installed = AssetBuilder::Installed(checked_path); installed_fp8 = AssetBuilder::InstalledFp8(checked_path); checked = now;
     }
     was_running = status.running;
     if (!status.running && status.exit_code == 0)
-        ImGui::TextUnformatted(installed ? "Success: complete INT8 assets found. Restart the game to use them." : "The script exited successfully, but the INT8 assets are incomplete. See the log.");
-    else ImGui::TextUnformatted(installed ? "Complete INT8 assets found on disk." : "No complete INT8 asset set found yet.");
+        ImGui::TextUnformatted((installed && installed_fp8) ? "Success: complete INT8 and FP8 assets found. Restart the game to use them." : "Preparation exited successfully, but INT8 or FP8 assets are incomplete. See the log.");
+    else {
+        ImGui::TextUnformatted(installed ? "INT8 assets: complete." : "INT8 assets: not prepared.");
+        ImGui::TextUnformatted(installed_fp8 ? "FP8 assets: complete." : "FP8 assets: not prepared; build assets above to add FP8.");
+    }
     ImGui::Text("Assets: %s", FsrAssetFolder().c_str());
     if (!status.log_path.empty()) ImGui::Text("Full log: %s", status.log_path.c_str());
     ImGui::PopTextWrapPos();
@@ -1625,7 +1640,7 @@ std::string LauncherWindow::Summary(std::vector<std::pair<std::string, std::stri
 	const auto res         = Times(S().Str("resolution"));
 	const bool dlss        = commands_.Dlss();
 	const auto upscaled_by =
-	    S().Str("upscaler") == "fsr4" ? std::string("FSR 4.1.2 INT8 selected (experimental)") :
+	    S().Str("upscaler") == "fsr4" ? (std::string("FSR 4.1.2 ") + (S().Str("fsr4_precision") == "fp8" ? "FP8" : "INT8") + " selected (experimental)") :
 	    std::string(T(dlss                         ? "summary.dlss"
 	                : commands_.FsrUpscaler()      ? "summary.fsr3"
 	                : S().Str("upscaler") == "off" ? "summary.noAa"

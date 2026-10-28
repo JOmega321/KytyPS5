@@ -21,6 +21,7 @@ public:
     void Cancel();
     Status Snapshot() const;
     static bool Installed(const std::filesystem::path& directory);
+    static bool InstalledFp8(const std::filesystem::path& directory);
 private:
     mutable std::mutex mutex_;
     Status status_;

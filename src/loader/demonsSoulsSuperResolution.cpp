@@ -47,7 +47,7 @@ bool SetLeastHeight(Program* program, uint32_t height) {
 
 void Install(Program* program) {
 	const char* upscaler = std::getenv("KYTY_UPSCALER");
-	// FSR 3.1 and FSR 4.1.1 INT8 both install this exact PS5 Pro path.
+	// FSR 3.1 and FSR 4.1.2 INT8/FP8 both install this exact PS5 Pro path.
 	// UpscalerRequested accepts fsr4 even before assets are ready: FSR 3.1 is its fallback.
 	bool fsr = Libs::Graphics::FsrNative::UpscalerRequested();
 	if (upscaler == nullptr || (std::string_view(upscaler) != "dlss" && !fsr) || program == nullptr ||
@@ -77,7 +77,7 @@ void Install(Program* program) {
 	g_active = true;
 	// (Its 1920x1080 output: DemonsSoulsHdOutput::Install takes the interface's part, DemonsSoulsRenderSize the sizes.)
 	g_hd = DemonsSoulsHdOutput::Requested();
-	std::printf("Demon's Souls super resolution: the PS5 Pro path (display mode 5, %s in place of the TAA) is on", fsr ? (std::string_view(upscaler) == "fsr4" ? "FSR 4.1.2 INT8 (FSR 3.1 fallback)" : "FSR 3.1") : "DLSS");
+	std::printf("Demon's Souls super resolution: the PS5 Pro path (display mode 5, %s in place of the TAA) is on", fsr ? (std::string_view(upscaler) == "fsr4" ? "FSR 4.1.2 (selected precision checked at runtime)" : "FSR 3.1") : "DLSS");
 	if (g_hd)
 		std::printf(", its output %ux%u (%s)", DemonsSoulsHdOutput::UpscaledWidth(), DemonsSoulsHdOutput::UpscaledHeight(),
 		            DemonsSoulsHdOutput::CustomOutputHeight() != 0 ? "KYTY_OUTPUT_HEIGHT" : "KYTY_HD_OUTPUT");

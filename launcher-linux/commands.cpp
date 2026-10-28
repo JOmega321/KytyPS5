@@ -33,6 +33,8 @@ const std::vector<std::string>& GameVariables() {
 	                                             "KYTY_FRAMEGEN_BACKEND",
 	                                             "KYTY_UPSCALER",
                                                  "KYTY_FSR4_WATERMARK",
+                                                 "KYTY_FSR4_PRECISION",
+                                                 "radv_cooperative_matrix2_nv",
                                                  "KYTY_PIPELINE_CACHE_DIR",
                                                  "KYTY_SHADER_PREFETCH_THREADS",
                                                  "KYTY_SHADER_FOLLOW_THREADS",
@@ -278,8 +280,13 @@ Launch Commands::Play(const GameInfo& game, bool direct) const {
 		Put(set, "KYTY_UPSCALER", "dlss");
 	else if (FsrUpscaler())
 		Put(set, "KYTY_UPSCALER", S().Str("upscaler"));
-	if (S().Str("upscaler") == "fsr4")
+	if (S().Str("upscaler") == "fsr4") {
         Put(set, "KYTY_FSR4_WATERMARK", S().Bool("fsr4_watermark") ? "1" : "0");
+        const bool fp8 = S().Str("fsr4_precision") == "fp8";
+        Put(set, "KYTY_FSR4_PRECISION", fp8 ? "fp8" : "int8");
+        if (fp8 && S().Bool("fsr4_radv_matrix_conversions"))
+            Put(set, "radv_cooperative_matrix2_nv", "true");
+    }
     if (!S().Str("shader_cache_dir").empty())
         Put(set, "KYTY_PIPELINE_CACHE_DIR", fs::absolute(context_.root / S().Str("shader_cache_dir")).lexically_normal().string());
     if (const int workers = S().Int("shader_workers"); workers >= 1 && workers <= 16) {

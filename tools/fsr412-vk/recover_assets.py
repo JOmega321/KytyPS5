@@ -113,7 +113,7 @@ def recover(data, audit, output, set_name="t1080_m0", modules=None, precision="i
     return report
 
 
-def recover_all(data, output, install=False):
+def recover_all(data, output, install=False, fp8_tools=None):
     if hashlib.sha256(data).hexdigest() != DLL_SHA256:
         raise ValueError('Requires amd_fidelityfx_upscaler_vk.dll 4.1.2.4555 from SDK 2.4.0; DLL hash does not match')
     output = output.absolute()
@@ -145,12 +145,18 @@ def recover_all(data, output, install=False):
                 reports[name] = recover(data, audit, temporary, name, modules)
                 os.rename(temporary/name, stage/name)
                 shutil.rmtree(temporary)
+            if fp8_tools is not None:
+                temporary=stage/'convert-fp8'
+                fp8_report=recover_fp8_all(data,temporary,fp8_tools,modules)
+                os.rename(temporary/'fp8',stage/'fp8')
+                for name,report in fp8_report['sets'].items():reports['fp8/'+name]=report
+                shutil.rmtree(temporary)
             manifest = {'asset_version': ASSET_VERSION, 'dll_sha256': DLL_SHA256,
                         'sets': reports, 'game_rendering_verified': False,
-                        'status': 'Experimental native Vulkan INT8 assets prepared; rendering still requires game testing.'}
+                        'status': 'Experimental native Vulkan assets prepared; rendering still requires game testing.'}
             (stage/'asset-provenance.json').write_text(json.dumps(manifest, indent=2)+'\n')
             (stage/'ASSET_VERSION').write_text(ASSET_VERSION+'\n')
-            print('[FSR412] Installing complete native INT8 assets', file=sys.stderr, flush=True)
+            print('[FSR412] Installing complete native assets', file=sys.stderr, flush=True)
             if output.exists():
                 backup = Path(tempfile.mkdtemp(prefix=output.name+'.previous-', dir=output.parent))
                 backup.rmdir()
@@ -163,14 +169,15 @@ def recover_all(data, output, install=False):
                 raise
             if backup is not None:
                 print('Previous generated assets preserved at: '+str(backup), file=sys.stderr, flush=True)
-            print('[FSR412] Ready: four INT8 model/tier sets; restart the game to use FSR 4.1.2', file=sys.stderr, flush=True)
+            ready='four INT8 and four FP8' if fp8_tools is not None else 'four INT8'
+            print('[FSR412] Ready: '+ready+' model/tier sets; restart the game to use FSR 4.1.2', file=sys.stderr, flush=True)
             return manifest
         finally:
             if stage.exists():
                 shutil.rmtree(stage)
 
 
-def recover_fp8_all(data, output, tools):
+def recover_fp8_all(data, output, tools, modules=None):
     if hashlib.sha256(data).hexdigest()!=DLL_SHA256:
         raise ValueError('Requires the audited Vulkan DLL 4.1.2.4555 from SDK 2.4.0')
     if output.exists():raise FileExistsError('Use a new FP8 output folder; existing assets are never replaced')
@@ -180,8 +187,9 @@ def recover_fp8_all(data, output, tools):
         if not os.access(tools/binary,os.X_OK):raise ValueError('Missing bundled tool: '+str(tools/binary))
     stage=Path(tempfile.mkdtemp(prefix='.'+output.name+'.fp8-',dir=output.parent))
     try:
-        modules,_,rejected=extract(data,fsr4_only=False)
-        if rejected:raise ValueError('Compressed program validation failed')
+        if modules is None:
+            modules,_,rejected=extract(data,fsr4_only=False)
+            if rejected:raise ValueError('Compressed program validation failed')
         (stage/'fp8').mkdir()
         reports={}
         for name in SETS:
@@ -210,15 +218,18 @@ def main():
     p.add_argument('--install', action='store_true', help='replace an owned installation, preserving its previous contents')
     p.add_argument('--fp8',action='store_true',help='prepare separate experimental FP8 test assets')
     p.add_argument('--spirv-tools',type=Path,help='directory containing the bundled pinned spirv-opt and spirv-val')
+    p.add_argument('--include-fp8',action='store_true',help='install both precisions with --all and --spirv-tools')
     a = p.parse_args()
     try:
         print('[FSR412] Checking official Vulkan DLL version and SHA-256', file=sys.stderr, flush=True)
         data = a.dll.read_bytes()
+        if a.include_fp8 and (not a.all or not a.spirv_tools or a.fp8):
+            raise ValueError('--include-fp8 requires --all, --spirv-tools and no --fp8')
         if a.fp8:
             if not a.spirv_tools or a.install:raise ValueError('FP8 requires --spirv-tools and a new output directory')
             report=recover_fp8_all(data,a.new_output,a.spirv_tools)
         elif a.all:
-            report = recover_all(data, a.new_output, a.install)
+            report = recover_all(data, a.new_output, a.install, a.spirv_tools if a.include_fp8 else None)
         else:
             if a.install:
                 raise ValueError('--install requires --all')

@@ -50,6 +50,16 @@ int main() {
     assert(!AssetBuilder::Installed(assets));
     std::ofstream(assets/"ASSET_VERSION") << "FSR412_VULKAN_INT8_4.1.2.4555\n";
     assert(AssetBuilder::Installed(assets));
+    assert(!AssetBuilder::InstalledFp8(assets));
+    const auto fp8 = dir / "fp8 sets";
+    fs::copy(assets, fp8, fs::copy_options::recursive);
+    fs::rename(fp8, assets / "fp8");
+    assert(!AssetBuilder::InstalledFp8(assets));
+    std::ofstream(assets / "fp8" / "ASSET_VERSION") << "FSR412_VULKAN_FP8_4.1.2.4555\n";
+    assert(AssetBuilder::InstalledFp8(assets));
+    fs::remove(assets / "fp8" / "t2160_m1" / "rcas.spv");
+    assert(!AssetBuilder::InstalledFp8(assets));
+    assert(AssetBuilder::Installed(assets));
     std::ofstream(assets/"t2160_m1"/"initializer.bin",std::ios::trunc) << "broken";
     assert(!AssetBuilder::Installed(assets));
     assert(builder.Start({"bash","-c","sleep 30 & wait"},dir/"cancel.log"));

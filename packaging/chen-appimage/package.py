@@ -41,8 +41,16 @@ conversion.mkdir(parents=True, exist_ok=True)
 for name in ('extract_vk.py', 'adapt_spirv.py', 'prune_bindings.py', 'legalize_fp8.py', 'recover_assets.py', 'build_assets.sh', 'host-int8-t1080-m0.json'):
     shutil.copy2(root / 'tools/fsr412-vk' / name, conversion / name)
 shutil.copytree(root / 'tools/fsr412-vk/recipes', conversion / 'recipes')
+shutil.copytree(root / 'tools/fsr412-vk/recipes-fp8', conversion / 'recipes-fp8')
 capture = conversion / 'prebuilt'
 (capture / 'bin').mkdir(parents=True)
+fp8_tools = root / '_Build/fp8-tools'
+for tool in ('spirv-opt', 'spirv-val'):
+    shutil.copy2(fp8_tools / 'build/tools' / tool, capture / 'bin' / tool)
+fp8_licenses = payload / 'LICENSES/fp8-tools'
+fp8_licenses.mkdir(parents=True, exist_ok=True)
+shutil.copy2(fp8_tools / 'source/LICENSE', fp8_licenses / 'SPIRV-Tools-LICENSE.txt')
+shutil.copy2(fp8_tools / 'source/external/spirv-headers/LICENSE', fp8_licenses / 'SPIRV-Headers-LICENSE.txt')
 python_version = f'python{sys.version_info.major}.{sys.version_info.minor}'
 python_home = capture / 'python'
 (python_home / 'bin').mkdir(parents=True)
@@ -93,6 +101,10 @@ else:
             manifest.write(dependency.name + ': ' + revision)
         for archive in sorted((build / 'externals').glob('*.zip')):
             manifest.write(archive.name + ': sha256 ' + hashlib.sha256(archive.read_bytes()).hexdigest() + '\n')
+with (payload / 'build-manifest.txt').open('a') as manifest:
+    for label, source in [('FP8 SPIRV-Tools', fp8_tools / 'source'), ('FP8 SPIRV-Headers', fp8_tools / 'source/external/spirv-headers')]:
+        manifest.write(label + ': ' + subprocess.check_output(['git', '-C', str(source), 'rev-parse', 'HEAD'], text=True))
+    manifest.write('\nFP8 tools build options:\n' + (fp8_tools / 'build/CMakeCache.txt').read_text())
 libdir = payload / 'lib'
 libdir.mkdir(exist_ok=True)
 host = re.compile(r'^(ld-linux|lib(c|m|pthread|dl|rt|resolv|util)\.so|lib(GL|EGL|GLX|GLdispatch|OpenGL|vulkan|drm|gbm))')

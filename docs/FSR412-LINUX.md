@@ -1,72 +1,82 @@
-# Experimental native FSR 4.1.2 INT8
+# Experimental native FSR 4.1.2 INT8 and FP8
 
-Branch: `chen-kytyps5-fsr412-linux`. Linux x86-64 AppImage, SDK 2.4.0 Vulkan
-upscaler 4.1.2.4555. This replaces the experimental 4.1.1 upscaler selection in
-this branch. The earlier branch and its generated 4.1.1 assets remain separate.
+Branch: `chen-kytyps5-fsr412-fp8`. The separate
+`chen-kytyps5-fsr412-linux` branch retains the confirmed INT8 build.
 
 ## Use the AppImage
 
-1. Make the downloaded AppImage executable and open it.
+1. Replace the AppImage and launch it. Settings, saves, shader caches and generated
+   assets remain under the existing XDG data locations.
 2. In **FSR4 setup**, choose your own `amd_fidelityfx_upscaler_vk.dll` from
-   AMD FSR SDK 2.4.0, then click **Build FSR4 INT8 assets**. The AppImage includes
-   the Python runtime and extraction code. Preparation runs entirely on Linux;
-   Steam, Proton, MinGW and shader-translation tools are unnecessary.
-3. In **Graphics**, select **FSR 4.1.2 INT8 (PS5 Pro path, experimental)**.
-   Enable **FSR 4 status watermark** to distinguish active FSR4, awaiting upscale,
-   and an actual FSR 3.1 fallback. Restart the game after preparing assets or
-   changing the output size/model.
+   AMD FSR SDK 2.4.0 (4.1.2.4555), then click **Build FSR4 INT8 + FP8 assets**.
+   Existing INT8 users need this preparation once to add the FP8 sets.
+3. In **Graphics**, select **FSR 4.1.2**, then choose **INT8** or
+   **FP8 (RDNA4, experimental)** under **FSR 4 precision**.
+4. For the tested Mesa RADV / RX 9060 XT path, enable **RADV matrix conversions**.
+   This opts the game process into the driver's experimental matrix-conversion
+   extension, as used by the successful standalone FP8 hardware test.
+5. Enable **FSR 4 status watermark** and restart the game. It reports the actual
+   successful precision: FP8, INT8, INT8 because FP8 is unavailable, awaiting
+   upscale, or FSR 3.1 fallback.
 
-The selector keeps the existing `fsr4` setting value. The setup page stores
-the Vulkan DLL choice separately in `fsr412_dll`; it preserves the older DLL
-setting rather than silently treating a DX12 DLL as the new Vulkan input.
+INT8 remains the default. If FP8 features, assets or pipeline creation are
+unavailable, the game reports the reason and attempts FSR 4.1.2 INT8. If that is
+also unavailable, it retains the existing FSR 3.1 fallback. The launcher footer
+reports the selected option; the in-game watermark reports runtime use. The
+legacy benchmark variable `BB_FSR411_VARIANT` cannot override the menu choice.
 
-The default asset folder is
-`~/.local/share/KytyPS5-chenxiao07/fsr4_412/` (or under `$XDG_DATA_HOME`).
-`fsr4_411/` remains untouched. Preparation checks the exact SDK DLL hash,
-validates and decompresses the selected shaders, verifies model initializers,
-and installs all four sets together. Existing recognized 4.1.2 assets are
-preserved in a sibling `.previous-*` folder when replaced. A failed preparation
-does not replace the installed assets. Logs are in the existing `logs/` folder.
+## Assets and preparation
 
-The game checks `ASSET_VERSION` before creating an upscaler. Missing assets,
-unsupported Vulkan features, unsupported sizes or pipeline failures retain the
-existing FSR 3.1 fallback and report a reason in the game log. The launcher's
-summary says which option is selected; the in-game watermark reports runtime use.
+Default folder: `~/.local/share/KytyPS5-chenxiao07/fsr4_412/`, or under
+`$XDG_DATA_HOME`; `KYTY_FSR412_DIR` can override it. The INT8 families are in
+the root and FP8 families in `fp8/`. Both have version markers. Old 4.1.1 assets
+remain separate.
 
-## Rendering path and scope
+Preparation checks the exact signed DLL SHA-256, shader identities and model
+initializers, then installs all eight sets together. It preserves an existing
+recognized installation in a sibling `.previous-*` folder on replacement;
+failed preparation leaves the active installation intact. The AppImage bundles
+Python, the standard library, pinned SSA tools and a strict SPIR-V validator.
+No host compiler, shader tools, Wine or Proton are needed. No AMD DLL, shader
+bytes or model weight bytes are distributed.
 
-`KYTY_UPSCALER=fsr4` uses the same `DemonsSoulsSuperResolution::Install` PS5 Pro
-constructor patch and display mode 5 as FSR 3.1. It consumes that path's scene
-color, depth, motion vectors, jitter and reset state. It does not upscale the
-already composed window or introduce a second game patch.
+The source CLI can prepare INT8 alone with `recover_assets.py DLL NEW_FOLDER
+--all`. Add `--include-fp8 --spirv-tools TOOLS_FOLDER` to prepare both precisions.
+The standalone `--fp8` test mode remains separate and never installs into Kyty.
+Logs are under the existing application `logs/` folder.
 
-INT8 normal-model and Ultra Performance families are included for output tiers
-through 1920x1080 and 3840x2160, including 2560x1440. The signed DLL's Windows
-host calls were recorded on an explicitly simulated INT8 adapter. Three frames
-per captured configuration were checked against the replay's constants,
-dispatch order and group counts. Only the user's own DLL supplies shader and
-weight bytes; none are included in the AppImage or repository.
+## Renderer and validation scope
 
-The scene color stays RGBA16F and motion vectors RG16F. Both RGBA16F and the
-game's packed `B10G11R11_UFLOAT_PACK32` HDR output are accepted: the native
-postpass and RCAS use formatless float storage writes, so both write directly
-into the game's output view. Internal history remains RGBA16F. CI tests all four
-families with packed output, sharpening on and off, and synchronization validation.
+Both precisions use the same `DemonsSoulsSuperResolution::Install` PS5 Pro
+constructor patch and display mode 5 as FSR 3.1, consuming that path's scene
+color, depth, motion vectors, jitter and reset state. Scene color remains
+RGBA16F, motion RG16F; output supports RGBA16F and the game's packed
+B10G11R11 HDR view. Internal history stays RGBA16F. This does not add FSR4 frame
+generation; the existing frame-generation backend remains in use.
 
-The native programs require Vulkan 1.3, linear compute derivatives, integer dot
-products, FP16/INT8/INT16, extended storage-image formats and push descriptors.
-Unlike the prior DXIL conversion, these official Vulkan INT8 shaders do not
-require `VK_VALVE_shader_mixed_float_dot_product`. RGB storage-image writes are
-padded to RGBA with alpha 1 to meet Vulkan's component-count rule; the changes
-and resulting hashes are recorded in each asset installation's provenance.
+The four normal/Ultra Performance families cover both output tiers through
+3840x2160, including 2560x1440. CPU host captures on explicitly synthetic
+adapters check shader selection, initializers, constants and dispatch groups.
+FP8 uses native float8 cooperative matrix multiplication and its own weights.
+Compatibility conversions remove unused globals and opaque local copies, pad
+RGB writes where required, and stage unsupported reverse matrix-use conversions
+through shared FP16/FP32 storage. All 116 final FP8 shaders pass strict Vulkan
+1.3 SPIR-V validation. The shader adaptations and final hashes are recorded
+in each installation's provenance.
 
-This is an experimental integration. Native standalone frame execution has
-passed on Mesa software Vulkan with Khronos validation and on the user's
-RX 9060 XT. Those results do not establish equivalence with AMD's reference,
-correct rendering in Demon's Souls, or performance. Frame generation continues
-to use the project's existing implementation; this does not add FSR4 frame
-generation. The FSR4 shader/model selection is explicitly INT8.
+The user confirmed INT8 working in Demon's Souls on an RX 9060 XT with less
+ghosting than FSR 3.1. The user also ran three native standalone FP8 frames
+(1280x720 -> 2560x1440, packed HDR, sharpening off) on the same GPU with all
+feature checks enabled and finite, populated readback. Khronos runtime
+validation was not requested in that hardware test. These observations do not
+establish equivalence with AMD's reference, broad game compatibility or
+performance. In-game FP8 rendering remains experimental and requires testing.
 
-Updates use manual AppImage replacement and preserve settings, saves, pipeline
-caches and generated assets outside the image. Host Vulkan drivers are required
-and are not bundled.
+The host supplies Vulkan drivers. INT8 requires Vulkan 1.3, compute derivatives,
+integer dot products, FP16/INT8/INT16, extended storage-image formats and push
+descriptors. FP8 additionally enables float8 cooperative matrices, matrix
+conversions, variable pointers, 16-bit storage, Vulkan memory model and full
+32-lane compute subgroups. Unsupported FP8 features are never forced on a device.
+
+Updates use manual AppImage replacement. Switching precision, preparing assets
+or changing output size/model applies on the next game launch.

@@ -1,7 +1,7 @@
 name: chenxiao07 AppImage
 on:
   push:
-    branches: [chen-kytyps5-fsr412-linux]
+    branches: [chen-kytyps5-fsr412-linux, chen-kytyps5-fsr412-fp8]
   workflow_dispatch:
 permissions:
   contents: read
@@ -25,6 +25,7 @@ jobs:
           bash -n tools/fsr412-vk/build_assets.sh packaging/chen-appimage/AppRun
           python3 tests/fsr412-vk-extract.py
           python3 tests/fsr412-host-audit.py
+          python3 -m py_compile tools/fsr412-vk/recover_assets.py packaging/chen-appimage/package.py packaging/chen-appimage/emit_screenshot.py
       - uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ~/.cache/ccache
@@ -69,6 +70,8 @@ jobs:
             _Build/native-binaries.tar.gz.sha256
           if-no-files-found: error
           retention-days: 7
+      - name: Build bundled native FP8 preparation tools
+        run: bash tools/fsr412-vk/build-fp8-tools.sh "$PWD/_Build/fp8-tools"
       - name: Assemble AppDir
         run: |
           /usr/bin/python3 packaging/chen-appimage/package.py _Build/appimage _Build/KytyPS5.AppDir
@@ -103,12 +106,15 @@ jobs:
           root = Path(os.environ['XDG_DATA_HOME']) / 'KytyPS5-chenxiao07'
           (root / 'launcher-settings.json').write_text(json.dumps({
               'upscaler': 'fsr4', 'fsr4_watermark': True,
+              'fsr4_precision': 'fp8', 'fsr4_radv_matrix_conversions': True,
               'shader_cache_dir': str(root / 'custom shader cache'),
               'shader_workers': 1, 'shader_warmup_background': False, 'precompile_jobs': 2}))
           PYSET
           APPIMAGE_EXTRACT_AND_RUN=1 "$image" --dry-run > _Build/final-launch.log
           grep -q "KYTY_UPSCALER='fsr4'" _Build/final-launch.log
           grep -q "KYTY_FSR4_WATERMARK='1'" _Build/final-launch.log
+          grep -q "KYTY_FSR4_PRECISION='fp8'" _Build/final-launch.log
+          grep -q "radv_cooperative_matrix2_nv='true'" _Build/final-launch.log
           grep -q "KYTY_PIPELINE_CACHE_DIR=.*custom shader cache" _Build/final-launch.log
           grep -q "KYTY_SHADER_PREFETCH_THREADS='1'" _Build/final-launch.log
           grep -q "KYTY_SHADER_FOLLOW_THREADS='1'" _Build/final-launch.log
@@ -149,11 +155,46 @@ jobs:
           root=Path(os.environ['XDG_DATA_HOME'])/'KytyPS5-chenxiao07/fsr4_412'
           assert (root/'ASSET_VERSION').read_text().strip()=='FSR412_VULKAN_INT8_4.1.2.4555'
           manifest=json.loads(Path('bundled-assets.json').read_text())
-          assert len(manifest['sets'])==4
+          assert len(manifest['sets'])==8
+          assert (root/'fp8/ASSET_VERSION').read_text().strip()=='FSR412_VULKAN_FP8_4.1.2.4555'
           for family in manifest['sets']:
               assert len(list((root/family).glob('*.spv')))==29
               assert (root/family/'initializer.bin').stat().st_size==131072
           PYASSETS
+          # A failed FP8 preparation must preserve the installed INT8/FP8 assets.
+          ./squashfs-root/usr/payload/tools/fsr412-vk/prebuilt/bin/kyty-python3 - <<'PYROLLBACK'
+          import os,sys
+          from pathlib import Path
+          bundle=Path('squashfs-root/usr/payload/tools/fsr412-vk').resolve()
+          sys.path.insert(0,str(bundle))
+          from recover_assets import recover_all
+          root=Path(os.environ['XDG_DATA_HOME'])/'KytyPS5-chenxiao07/fsr4_412'
+          before=(root/'asset-provenance.json').read_bytes()
+          try:
+              recover_all(Path('sdk-upscaler.dll').read_bytes(),root,True,Path('missing-tools'))
+          except ValueError:
+              pass
+          else:
+              raise AssertionError('Missing FP8 tools were accepted')
+          assert (root/'asset-provenance.json').read_bytes()==before
+          assert (root/'fp8/ASSET_VERSION').is_file()
+          PYROLLBACK
+          # Exercise the actual GUI-to-builder success path with the private tools.
+          mkdir -p setup-success
+          APPIMAGE_EXTRACT_AND_RUN=1 SDL_VIDEODRIVER=x11 timeout 120s xvfb-run -a "$image" --prepare-fsr412 "$PWD/sdk-upscaler.dll" --screenshot "$PWD/setup-success" > setup-success.log 2>&1
+          grep -q 'Ready: four INT8 and four FP8' "$XDG_DATA_HOME"/KytyPS5-chenxiao07/logs/fsr412-build-*.log
+          test -f setup-success/8-fsrsetup.bmp
+          # Verify that selecting INT8 clears the managed RADV opt-in.
+          python3 - <<'PYINT8'
+          import json,os
+          from pathlib import Path
+          p=Path(os.environ['XDG_DATA_HOME'])/'KytyPS5-chenxiao07/launcher-settings.json'
+          data=json.loads(p.read_text());data['fsr4_precision']='int8';p.write_text(json.dumps(data))
+          PYINT8
+          APPIMAGE_EXTRACT_AND_RUN=1 "$image" --dry-run > final-int8-launch.log
+          grep -q "KYTY_FSR4_PRECISION='int8'" final-int8-launch.log
+          if grep -q "radv_cooperative_matrix2_nv='true'" final-int8-launch.log; then exit 1; fi
+          python3 ../packaging/chen-appimage/emit_screenshot.py screenshots/3-graphics.bmp setup-success/8-fsrsetup.bmp
           test -d "$XDG_DATA_HOME/KytyPS5-chenxiao07/.runtime"
       - name: Upload AppImage and checksum
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -171,6 +212,8 @@ jobs:
             _Build/*.log
             _Build/screenshots/
             _Build/setup-failure/
+            _Build/setup-success/
+            _Build/setup-success.log
             _Build/native-stage.tar.gz
             _Build/appimage/CMakeCache.txt
           if-no-files-found: ignore

@@ -343,7 +343,7 @@ struct Upscaler::Impl {
             return bool(std::ifstream(dir + "/" + r.folder + "t1080_m0/initializer.bin"));
         };
         const char* env = std::getenv("BB_FSR411_VARIANT");
-        const std::string wanted = env ? env : "";
+        const std::string wanted = features.explicit_precision ? (features.fp8_matrices ? "fp8" : "int8") : (env ? env : "");
         if (wanted == "fp8emu" && features.fp16_matrices && built(kFp8Emulated)) {
             rules = &kFp8Emulated;
         } else if (wanted != "int8" && features.fp8_matrices && built(kFp8)) {
