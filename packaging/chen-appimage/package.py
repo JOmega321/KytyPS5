@@ -38,7 +38,7 @@ for source in (root / 'tools/local/static-precompile').glob('*'):
 # shader translator is needed in this payload. Bundle the Python standard library.
 conversion = payload / 'tools/fsr412-vk'
 conversion.mkdir(parents=True, exist_ok=True)
-for name in ('extract_vk.py', 'adapt_spirv.py', 'recover_assets.py', 'build_assets.sh', 'host-int8-t1080-m0.json'):
+for name in ('extract_vk.py', 'adapt_spirv.py', 'prune_bindings.py', 'legalize_fp8.py', 'recover_assets.py', 'build_assets.sh', 'host-int8-t1080-m0.json'):
     shutil.copy2(root / 'tools/fsr412-vk' / name, conversion / name)
 shutil.copytree(root / 'tools/fsr412-vk/recipes', conversion / 'recipes')
 capture = conversion / 'prebuilt'

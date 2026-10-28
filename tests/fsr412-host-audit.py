@@ -13,6 +13,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/'tools/fsr412-vk'))
 from analyze_capture import analyze, local_file
 from adapt_spirv import pad_rgb_writes
+from prune_bindings import prune_unused_bindings
+from legalize_fp8 import remove_dead_opaque_locals, bridge_reverse_matrix_conversions
 
 
 def shader():
@@ -123,6 +125,54 @@ class ShaderAdaptationTests(unittest.TestCase):
 
     def test_reject_malformed_instruction_stream(self):
         with self.assertRaises(ValueError):pad_rgb_writes(image_shader()[:-1])
+
+
+class Fp8LegalizationTests(unittest.TestCase):
+    def fixture(self, opaque=False, live=False):
+        raw=image_shader(False)
+        w=list(struct.unpack('<'+'I'*(len(raw)//4),raw));parts=[];at=5
+        while at<len(w):
+            n=w[at]>>16;parts.append(w[at:at+n]);at+=n
+        def ins(op,*a):return [((len(a)+1)<<16)|op,*a]
+        out=w[:5];out[3]=22 if live else 21 if opaque else 20
+        for a in parts:
+            op=a[0]&65535
+            if not opaque and op==15:a=a+[19];a[0]=(len(a)<<16)|15
+            if not opaque and op==19:out+=ins(71,19,34,0)+ins(71,19,33,99)
+            if op==54:out+=ins(32,19,7,6) if opaque else ins(59,7,19,0)
+            out+=a
+            if opaque and op==248:out+=ins(59,19,20,7)
+            if opaque and op==61 and a[2]==16:
+                out+=ins(62,20,16)
+                if live:out+=ins(61,6,21,20)
+        return raw,struct.pack('<'+'I'*len(out),*out)
+
+    def test_prune_unreferenced_descriptor_preserves_all_function_bytes(self):
+        original,modified=self.fixture()
+        converted,dead=prune_unused_bindings(modified)
+        self.assertEqual(dead,[19]);self.assertEqual(converted,original)
+
+    def test_remove_only_dead_opaque_locals(self):
+        _,modified=self.fixture(opaque=True)
+        converted,dead=remove_dead_opaque_locals(modified)
+        self.assertEqual(dead,[20]);self.assertLess(len(converted),len(modified))
+        if shutil.which('spirv-val'):
+            with tempfile.TemporaryDirectory() as folder:
+                p=Path(folder)/'test.spv';p.write_bytes(converted)
+                subprocess.run(['spirv-val','--target-env','vulkan1.3',str(p)],check=True)
+        _,live=self.fixture(opaque=True,live=True)
+        self.assertEqual(remove_dead_opaque_locals(live),(live,[]))
+
+    def test_fp8_e4m3_shared_staging_preserves_all_finite_values(self):
+        for b in range(256):
+            sign=-1 if b&128 else 1;e=(b>>3)&15;m=b&7
+            if e==15 and m==7:continue
+            value=sign*((m/8)*2**-6 if e==0 else (1+m/8)*2**(e-7))
+            half=struct.unpack('<e',struct.pack('<e',value))[0]
+            f32=struct.unpack('<f',struct.pack('<f',half))[0]
+            self.assertEqual(value,f32)
+        addresses=[lane+32*k for lane in range(32) for k in range(8)]
+        self.assertEqual(sorted(addresses),list(range(256)))
 
 
 if __name__=='__main__':unittest.main()

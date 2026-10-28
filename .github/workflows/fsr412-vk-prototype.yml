@@ -133,7 +133,7 @@ jobs:
           dist=_Build/native-test-distribution
           mkdir -p "$dist/source/tools/fsr412-vk" "$dist/source/src/local/fsr411"
           cp _Build/native-test/native-frame-test "$dist/"
-          cp tools/fsr412-vk/{extract_vk.py,adapt_spirv.py,recover_assets.py,host-int8-t1080-m0.json,run-native-test.sh,NATIVE-TEST.md} "$dist/"
+          cp tools/fsr412-vk/{extract_vk.py,adapt_spirv.py,prune_bindings.py,legalize_fp8.py,recover_assets.py,host-int8-t1080-m0.json,run-native-test.sh,NATIVE-TEST.md} "$dist/"
           cp -r tools/fsr412-vk/recipes "$dist/"
           cp tools/fsr412-vk/{native_frame_test.cpp,build-frame-test.sh} "$dist/source/tools/fsr412-vk/"
           cp src/local/fsr4-formats.h "$dist/source/src/local/"

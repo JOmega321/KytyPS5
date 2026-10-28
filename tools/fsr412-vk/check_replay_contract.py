@@ -22,35 +22,39 @@ def bits(value):
     return struct.unpack('<I', struct.pack('<f', value))[0]
 
 
-def groups(name, rw, rh, ow, oh):
+def groups(name, rw, rh, ow, oh, fp8=False):
     ceil = lambda x, y: (x+y-1)//y
     aw, ah = (ow+7)&~7, (oh+7)&~7
     if name == 'spd':return [ceil(rw,64),ceil(rh,64),1]
     if name == 'rcas':return [ceil(aw,16),ceil(ah,16),1]
-    if name == 'prepass':return [ceil(aw,16),ceil(ah,16),1]
-    if name == 'postpass':return [ceil(aw,32),ceil(ah,32),1]
+    if name == 'prepass':return [ceil(aw,64),ceil(ah,2),1] if fp8 else [ceil(aw,16),ceil(ah,16),1]
+    if name == 'postpass':return [ceil(aw,64),ceil(ah,2),1] if fp8 else [ceil(aw,32),ceil(ah,32),1]
     k = int(re.fullmatch(r'pass(\d+)(?:_post)?', name)[1])
     if name.endswith('_post'):
         level = [1,1,1,2,2,2,3,3,3,2,2,1,1][k]
         w,h = aw>>level,ah>>level
         tw, th = (3840, 2160) if ow > 1920 or oh > 1080 else (1920, 1080)
-        kx = min((((tw>>level)+3)//4)*4+1-w,5)
+        alignment=32 if fp8 else 4
+        kx = min(ceil(tw>>level,alignment)*alignment+1-w,alignment+1)
         ky = min((th>>level)+1-h,1)
         return [ceil((w+1+kx)+h+h*kx+(w+1+kx)*ky,32),1,1]
     level = [1,1,1,2,2,2,3,3,3,3,2,2,1][k]
+    if fp8:
+        tile=[(0,0),(16,8),(16,8),(32,1),(16,4),(16,4),(32,1),(16,2),(16,2),(16,1),(16,4),(16,1),(16,8)][k]
+        return [ceil(aw>>level,tile[0]),ceil(ah>>level,tile[1]),1]
     return [ceil(aw>>level,64),ah>>level,1]
 
 
 def check(audit,rw,rh,ow,oh):
-    if audit['synthetic_profile'] != 'int8' or not 0<rw<=ow<=3840 or not 0<rh<=oh<=2160:
-        raise ValueError('expected a supported INT8 render/output size')
+    if audit['synthetic_profile'] not in ('int8','fp8') or not 0<rw<=ow<=3840 or not 0<rh<=oh<=2160:
+        raise ValueError('expected a supported INT8/FP8 render/output size')
     checked = 0
     for key, frame in audit['frames'].items():
         number = int(key)
         if len(frame)!=29:raise ValueError('wrong pass count')
         for i, p in enumerate(frame):
             name = 'spd' if i==0 else 'rcas' if i==28 else p['entry'].removeprefix(PREFIX)
-            if name != SEQUENCE[i] or p['groups'] != groups(name,rw,rh,ow,oh):
+            if name != SEQUENCE[i] or p['groups'] != groups(name,rw,rh,ow,oh,audit['synthetic_profile']=='fp8'):
                 raise ValueError(f'frame {number} {name}: dispatch rule mismatch')
             constants = p['constants']
             if name in ('prepass','postpass'):

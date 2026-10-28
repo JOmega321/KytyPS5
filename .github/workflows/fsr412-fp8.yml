@@ -8,11 +8,11 @@ permissions:
 jobs:
   audit:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Install offline recorder toolchain
-        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends wine64 gcc-mingw-w64-x86-64-posix
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends wine64 gcc-mingw-w64-x86-64-posix ninja-build cmake libvulkan-dev mesa-vulkan-drivers spirv-tools patchelf python3-full
       - name: Build recorder and obtain verified SDK input
         run: |
           git clone https://github.com/KhronosGroup/Vulkan-Headers.git _Build/headers
@@ -34,6 +34,7 @@ jobs:
             timeout 120 /usr/lib/wine/wine64 "$root/_Build/bin/capture.exe" "Z:$root/_Build/bin/upscaler.dll" fp8 "$render" "$output" 3
             cd "$root"
             python3 tools/fsr412-vk/analyze_capture.py "_Build/capture-$family" _Build/bin/upscaler.dll "_Build/fp8-$family.json"
+            python3 tools/fsr412-vk/check_replay_contract.py "_Build/fp8-$family.json" "$render" "$output"
           done <<'CASES'
           t1080_m0 1280x720 1920x1080
           t1080_m1 640x360 1920x1080
@@ -41,6 +42,58 @@ jobs:
           t2160_m1 1280x720 3840x2160
           t1440_m0 1280x720 2560x1440
           CASES
+      - name: Verify committed FP8 recipes and conversion regression tests
+        run: |
+          python3 tests/fsr412-host-audit.py
+          python3 - <<'PYRECIPES'
+          import json
+          from pathlib import Path
+          for name in ('t1080_m0','t1080_m1','t2160_m0','t2160_m1'):
+              old=json.loads((Path('tools/fsr412-vk/recipes-fp8')/(name+'.json')).read_text())
+              new=json.loads((Path('_Build')/('fp8-'+name+'.json')).read_text())
+              assert old['initializers']==new['initializers'],name
+              assert old['frames']==new['frames'],name
+          PYRECIPES
+      - name: Build pinned modern FP8 SSA tool and strict validator
+        run: bash tools/fsr412-vk/build-fp8-tools.sh "$PWD/_Build/fp8-tools"
+      - name: Prepare and strictly validate all FP8 asset families
+        run: |
+          python3 tools/fsr412-vk/recover_assets.py _Build/bin/upscaler.dll _Build/fp8-assets --fp8 --spirv-tools _Build/fp8-tools/build/tools > _Build/fp8-recovery.json
+          test "$(find _Build/fp8-assets/fp8 -name '*.spv' | wc -l)" -eq 116
+      - name: Build native FP8 test and verify INT8 regression on software Vulkan
+        run: |
+          bash tools/fsr412-vk/build-frame-test.sh _Build/native "$PWD/_Build/headers/include"
+          python3 tools/fsr412-vk/recover_assets.py _Build/bin/upscaler.dll _Build/int8-assets > _Build/int8-recovery.json
+          export VK_DRIVER_FILES=$(find /usr/share/vulkan/icd.d -name '*lvp*' -print -quit)
+          test -n "$VK_DRIVER_FILES"
+          _Build/native/native-frame-test _Build/int8-assets _Build/int8-output.raw 320x180 640x360 3 r11g11b10 no-sharpen int8 | tee _Build/int8-frame-test.log
+          status=0
+          _Build/native/native-frame-test --fp8-check > _Build/fp8-feature-check.log 2>&1 || status=$?
+          test "$status" -ne 0
+          grep -q 'Missing device extension:' _Build/fp8-feature-check.log
+      - name: Package private preparation runtime without AMD bytes
+        run: |
+          /usr/bin/python3 tools/fsr412-vk/package-fp8-test.py _Build/native _Build/fp8-tools _Build/distribution
+          _Build/distribution/prebuilt/bin/kyty-python3 -c 'import struct,zlib,json,hashlib,fcntl; print("Bundled Python: OK")'
+          (cd _Build/distribution && sha256sum --quiet -c SHA256SUMS)
+          # Verify the relocated package with host Python and compilers hidden.
+          mv _Build/distribution "_Build/FP8 test bundle"
+          mkdir -p "$RUNNER_TEMP/base-tools"
+          for command in bash dirname env; do ln -s "$(type -P "$command")" "$RUNNER_TEMP/base-tools/$command"; done
+          PATH="$RUNNER_TEMP/base-tools" "_Build/FP8 test bundle/prebuilt/bin/kyty-python3" "_Build/FP8 test bundle/recover_assets.py" "$PWD/_Build/bin/upscaler.dll" "$PWD/_Build/packaged-fp8-assets" --fp8 --spirv-tools "$PWD/_Build/FP8 test bundle/prebuilt/bin" > _Build/packaged-recovery.json
+          # Reproduce ZIP permission loss and test the wrapper's safe prerequisite failure.
+          chmod -x "_Build/FP8 test bundle/native-frame-test" "_Build/FP8 test bundle/prebuilt/bin/spirv-opt" "_Build/FP8 test bundle/prebuilt/bin/spirv-val"
+          status=0
+          bash "_Build/FP8 test bundle/run-fp8-test.sh" --radv-matrix-conversions "$PWD/_Build/bin/upscaler.dll" > _Build/packaged-check.log 2>&1 || status=$?
+          test "$status" -eq 1
+          grep -q 'FP8 prerequisites failed' _Build/packaged-check.log
+      - name: Upload native FP8 test (hardware execution unverified)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: fsr412-native-fp8-frame-test-x86_64
+          path: _Build/FP8 test bundle/
+          if-no-files-found: error
+          retention-days: 30
       - name: Show recorder diagnostics without AMD byte data
         if: always()
         run: |

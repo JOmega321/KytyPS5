@@ -58,10 +58,10 @@ uint32_t MemoryType(const Gpu& gpu, uint32_t bits, VkMemoryPropertyFlags flags) 
     std::exit(1);
 }
 
-Gpu CreateGpu() {
+Gpu CreateGpu(bool fp8=false) {
     Gpu gpu;
     VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
-    app.pApplicationName = "FSR 4.1.2 native INT8 experimental frame test";
+    app.pApplicationName = "FSR 4.1.2 native experimental frame test";
     app.apiVersion = VK_API_VERSION_1_3;
     VkInstanceCreateInfo ici{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
     ici.pApplicationInfo = &app;
@@ -110,6 +110,10 @@ Gpu CreateGpu() {
     VkPhysicalDeviceVulkan13Features f13{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
     VkPhysicalDeviceVulkan12Features f12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
     VkPhysicalDeviceVulkan11Features f11{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES};
+    VkPhysicalDeviceShaderFloat8FeaturesEXT f8{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT8_FEATURES_EXT};
+    VkPhysicalDeviceCooperativeMatrixFeaturesKHR matrix{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR};
+    VkPhysicalDeviceCooperativeMatrix2FeaturesNV matrix2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_2_FEATURES_NV};
+    if(fp8){derivatives.pNext=&f8;f8.pNext=&matrix;matrix.pNext=&matrix2;}
     VkPhysicalDeviceFeatures2 features{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
     features.pNext=&f11;f11.pNext=&f12;f12.pNext=&f13;f13.pNext=&derivatives;
     vkGetPhysicalDeviceFeatures2(gpu.physical,&features);
@@ -120,6 +124,7 @@ Gpu CreateGpu() {
     }
     std::vector<const char*> extensions{VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME,
                                        VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME};
+    if(fp8)for(const char *name:{VK_EXT_SHADER_FLOAT8_EXTENSION_NAME,VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME,VK_NV_COOPERATIVE_MATRIX_2_EXTENSION_NAME})extensions.push_back(name);
     uint32_t available_count=0;
     CHECK(vkEnumerateDeviceExtensionProperties(gpu.physical,nullptr,&available_count,nullptr));
     std::vector<VkExtensionProperties> available(available_count);
@@ -127,6 +132,15 @@ Gpu CreateGpu() {
     for(const char *required:extensions) {
         if(!std::any_of(available.begin(),available.end(),[&](const auto& e){return !std::strcmp(e.extensionName,required);})) {
             std::fprintf(stderr,"Missing device extension: %s\n",required);std::exit(1);
+        }
+    }
+    if(fp8) {
+        std::printf("FP8 features: float8=%u matrixFloat8=%u cooperativeMatrix=%u conversions=%u memoryModel=%u variablePointers=%u storage16=%u subgroupSizeControl=%u fullSubgroups=%u\n",
+            f8.shaderFloat8,f8.shaderFloat8CooperativeMatrix,matrix.cooperativeMatrix,matrix2.cooperativeMatrixConversions,
+            f12.vulkanMemoryModel,f11.variablePointers,f11.storageBuffer16BitAccess,f13.subgroupSizeControl,f13.computeFullSubgroups);
+        if(!f8.shaderFloat8 || !f8.shaderFloat8CooperativeMatrix || !matrix.cooperativeMatrix || !matrix2.cooperativeMatrixConversions ||
+           !f12.vulkanMemoryModel || !f11.variablePointers || !f11.variablePointersStorageBuffer || !f11.storageBuffer16BitAccess || !f13.subgroupSizeControl || !f13.computeFullSubgroups) {
+            std::fprintf(stderr,"Required native FP8 matrix features are unavailable; no INT8 fallback is used by this test\n");std::exit(1);
         }
     }
     if(gpu.family==families){std::fprintf(stderr,"No compute queue\n");std::exit(1);}
@@ -227,11 +241,21 @@ Image CreateImage(const Gpu& gpu, VkFormat format, uint32_t w, uint32_t h, VkIma
 
 int main(int argc,char **argv) {
     setvbuf(stdout,nullptr,_IONBF,0);
-    if(argc<3 || argc>8){std::fprintf(stderr,"usage: native-frame-test ASSETS NEW_OUTPUT.raw [RENDER_WxH] [OUTPUT_WxH] [FRAMES] [rgba16f|r11g11b10] [sharpen|no-sharpen]\n");return 2;}
+    if(argc==2 && !std::strcmp(argv[1],"--fp8-check")) {
+        const Gpu gpu=CreateGpu(true);
+        vkDestroyDevice(gpu.device,nullptr);
+        if(debug_messenger){auto destroy=reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(vkGetInstanceProcAddr(gpu.instance,"vkDestroyDebugUtilsMessengerEXT"));destroy(gpu.instance,debug_messenger,nullptr);}
+        vkDestroyInstance(gpu.instance,nullptr);
+        std::puts("Native FP8 feature prerequisites: OK; shader execution remains untested");return 0;
+    }
+    if(argc<3 || argc>9){std::fprintf(stderr,"usage: native-frame-test ASSETS NEW_OUTPUT.raw [RENDER_WxH] [OUTPUT_WxH] [FRAMES] [rgba16f|r11g11b10] [sharpen|no-sharpen] [int8|fp8]\n");return 2;}
     uint32_t rw=320,rh=180,ow=640,oh=360;int frames=argc>5?std::atoi(argv[5]):3;
     if((argc>3 && std::sscanf(argv[3],"%ux%u",&rw,&rh)!=2) ||
        (argc>4 && std::sscanf(argv[4],"%ux%u",&ow,&oh)!=2) || !rw || !rh || rw>ow || rh>oh || ow>3840 || oh>2160 || frames<1 || frames>8){std::fprintf(stderr,"Supported output is up to 3840x2160, with 1 to 8 frames\n");return 2;}
     if(double(ow)/rw>3.01 || double(oh)/rh>3.01){std::fprintf(stderr,"Upscale ratio exceeds the audited 3x model\n");return 2;}
+    const std::string precision=argc>8?argv[8]:"int8";
+    if(precision!="int8" && precision!="fp8"){std::fprintf(stderr,"Unknown precision\n");return 2;}
+    const bool fp8=precision=="fp8";
     const std::string format=argc>6?argv[6]:"rgba16f";
     const std::string sharpening=argc>7?argv[7]:"sharpen";
     if((format!="rgba16f" && format!="r11g11b10") || (sharpening!="sharpen" && sharpening!="no-sharpen")) {
@@ -244,9 +268,9 @@ int main(int argc,char **argv) {
     }
     std::printf("Output format: %s; sharpening: %s\n",format.c_str(),sharpening.c_str());
     FILE *file=std::fopen(argv[2],"wbx");if(!file){std::perror("new output file");return 2;}
-    setenv("BB_FSR411_VARIANT","int8",1);
-    std::printf("EXPERIMENTAL native FSR 4.1.2 INT8 frame test; no AMD reference comparison yet.\n");
-    const Gpu gpu=CreateGpu();
+    setenv("BB_FSR411_VARIANT",fp8?"fp8":"int8",1);
+    std::printf("EXPERIMENTAL native FSR 4.1.2 %s frame test; no AMD reference comparison yet.\n",fp8?"FP8":"INT8");
+    const Gpu gpu=CreateGpu(fp8);
     const VkImageUsageFlags usage=VK_IMAGE_USAGE_SAMPLED_BIT|VK_IMAGE_USAGE_STORAGE_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT|VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     Image color=CreateImage(gpu,VK_FORMAT_R16G16B16A16_SFLOAT,rw,rh,usage,VK_IMAGE_ASPECT_COLOR_BIT);
     Image depth=CreateImage(gpu,VK_FORMAT_R32_SFLOAT,rw,rh,usage,VK_IMAGE_ASPECT_COLOR_BIT);
@@ -289,7 +313,10 @@ int main(int argc,char **argv) {
     VkMemoryBarrier barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};barrier.srcAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT;barrier.dstAccessMask=VK_ACCESS_SHADER_READ_BIT|VK_ACCESS_SHADER_WRITE_BIT;
     vkCmdPipelineBarrier(cmd,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,0,1,&barrier,0,nullptr,0,nullptr);submit();
     {
-        Fsr411::Upscaler upscaler(gpu.physical,gpu.device,argv[1]);
+        Fsr411::Features enabled{};enabled.fp8_matrices=fp8;
+        Fsr411::Upscaler upscaler(gpu.physical,gpu.device,argv[1],enabled);
+        if(fp8 && upscaler.Describe().rfind("FP8 ",0)!=0){std::fprintf(stderr,"FP8 assets were not selected; refusing INT8 fallback\n");return 1;}
+        std::printf("Replay precision: %s\n",fp8?"FP8 (native cooperative matrices)":"INT8");
         for(int i=0;i<frames;i++) {
             CHECK(vkBeginCommandBuffer(cmd,&begin));Fsr411::Frame f;f.cmdbuf=cmd;f.color={color.image,color.view,rw,rh};f.depth={depth.image,depth.view,rw,rh};f.motion={motion.image,motion.view,rw,rh};f.output={output.image,output.view,ow,oh};f.render_width=rw;f.render_height=rh;f.ultra_performance=double(ow)/rw>2.5;f.jitter[0]=0.25f*float(i%4)-0.375f;f.jitter[1]=0.125f;f.sharpen=sharpening=="sharpen";f.sharpness=f.sharpen?0.5f:0.0f;f.reset=i==0;f.auto_exposure=true;
             if(!upscaler.Record(f)){std::fprintf(stderr,"Native replay failed: %s\n",upscaler.Error().c_str());std::fclose(file);return 1;}
