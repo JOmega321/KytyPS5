@@ -6,6 +6,38 @@ on:
 permissions:
   contents: read
 jobs:
+  host-capture:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Install offline capture build tools
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends wine64 gcc-mingw-w64-x86-64-posix
+      - name: Build recorder against pinned Khronos headers
+        run: |
+          git clone https://github.com/KhronosGroup/Vulkan-Headers.git _Build/vulkan-headers
+          git -C _Build/vulkan-headers checkout 73814d006638aa00bd553215b054f0f02e457e22
+          bash tools/fsr412-vk/build-capture.sh "$PWD/_Build/capture-bin" "$PWD/_Build/vulkan-headers/include"
+          curl -fL --retry 3 -o _Build/capture-bin/amd_fidelityfx_upscaler_vk.dll https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/v2.4.0/Kits/FidelityFX/signedbin/amd_fidelityfx_upscaler_vk.dll
+          echo '4a7e895af6e0b615d40a84d59eb8c2b1054ad91cdd0c739567940270d51bdab7  _Build/capture-bin/amd_fidelityfx_upscaler_vk.dll' | sha256sum -c
+      - name: Record synthetic INT8 host decisions (no GPU execution)
+        env:
+          WINEDEBUG: '-all'
+          WINEARCH: win64
+          WINEDLLOVERRIDES: 'vulkan-1=n;mscoree,mshtml='
+        run: |
+          export WINEPREFIX="$PWD/_Build/wine-prefix"
+          bin="$PWD/_Build/capture-bin"
+          mkdir -p _Build/capture-int8
+          cd _Build/capture-int8
+          timeout 120 /usr/lib/wine/wine64 "$bin/capture.exe" "Z:$bin/amd_fidelityfx_upscaler_vk.dll" int8 1280x720 1920x1080 3
+      - name: Show host trace diagnostics (no shader or weight bytes)
+        if: always()
+        run: |
+          if test -f _Build/capture-int8/trace.jsonl; then
+            head -n 30 _Build/capture-int8/trace.jsonl
+            tail -n 4 _Build/capture-int8/trace.jsonl
+          fi
   prototype:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
