@@ -34,6 +34,7 @@ void Usage() {
 	    "kyty_launcher: KytyPS5's settings window for Linux\n"
 	    "  --play                 start the game with the saved settings, without the window\n"
 	    "  --lang en|zh|pt        the window's language for this run\n"
+	    "  --prepare-fsr411 DLL    open the FSR4 setup page and build assets\n"
 	    "  --dry-run              print the scripts the buttons run\n"
 	    "  --screenshot <folder>  save each page as a picture, then exit\n");
 }
@@ -60,11 +61,13 @@ bool SaveScreenshot(SDL_Renderer* renderer, const std::string& file) {
 
 int main(int argc, char* argv[]) {
 	bool        play = false, dry_run = false;
-	std::string screenshots, lang;
+	std::string screenshots, lang, prepare_dll;
 	for (int i = 1; i < argc; ++i) {
 		const std::string arg = argv[i];
 		if (arg == "--play")
 			play = true;
+		else if (arg == "--prepare-fsr411" && i + 1 < argc)
+            prepare_dll = argv[++i];
 		else if (arg == "--dry-run")
 			dry_run = true;
 		else if (arg == "--screenshot" && i + 1 < argc)
@@ -172,12 +175,14 @@ int main(int argc, char* argv[]) {
 	{
 		LauncherWindow launcher(context, renderer);
 		launcher.ApplyScale(display_scale);
+        if (!prepare_dll.empty()) launcher.PrepareFsrAssets(prepare_dll);
 		int frames =
 		    3; // frames still to draw before waiting for an event (ImGui settles over a couple)
 		bool done = false;
 		int  shot = screenshots.empty() ? -1 : 0;
 		if (shot == 0) launcher.ShowPage(0);
 		int shot_frames = 0;
+        int asset_settle_frames = 0;
 		while (!done) {
 			SDL_Event event;
 			bool      any = false;
@@ -208,6 +213,7 @@ int main(int argc, char* argv[]) {
 			launcher.Poll();
 			if (launcher.ScaleChanged()) {
 				launcher.ApplyScale(display_scale);
+        if (!prepare_dll.empty()) launcher.PrepareFsrAssets(prepare_dll);
 				frames = 3;
 			}
 			if ((SDL_GetWindowFlags(window) & SDL_WINDOW_MINIMIZED) != 0 && shot < 0) {
@@ -224,7 +230,9 @@ int main(int argc, char* argv[]) {
 			SDL_SetRenderDrawColor(renderer, 0x10, 0x10, 0x12, 0xff);
 			SDL_RenderClear(renderer);
 			ImGui_ImplSDLRenderer2_RenderDrawData(ImGui::GetDrawData(), renderer);
-			if (shot >= 0 && ++shot_frames >= 6) {
+			if (!prepare_dll.empty()) asset_settle_frames = launcher.AssetBuildRunning() ? 0 : asset_settle_frames + 1;
+            if (shot >= 0 && ++shot_frames >= 6 &&
+                (prepare_dll.empty() || shot != LauncherWindow::PageCount() - 1 || asset_settle_frames >= 3)) {
 				// (Read before the present: the back buffer holds this frame.)
 				const auto file = screenshots + "/" + std::to_string(shot + 1) + "-" +
 				                  LauncherWindow::PageName(shot) + ".bmp";

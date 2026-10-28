@@ -103,3 +103,20 @@ CPU controls on Shaders:
   via precompile-linux.sh `--jobs`. Applies to offline precompilation only.
 
 These expose existing emulator controls; no FPS gain is asserted without benchmarks.
+
+## Build assets from the menu
+
+Open **FSR4 setup** in the sidebar, or use **Set up FSR 4.1.1 assets** on Graphics.
+Choose `amd_fidelityfx_upscaler_dx12.dll` (4.1.1), then **Build FSR4 INT8 assets**.
+No terminal command is needed. The page shows the current stage, elapsed time,
+capture counts and live stdout/stderr. It keeps a full build log, provides Cancel,
+and checks that all four INT8 sets contain their 29 SPIR-V modules and weights.
+This checks file completeness, not GPU rendering or compatibility.
+
+The builder still requires Python, SPIR-V tools, MinGW GCC, CMake, Ninja, GCC,
+Git, flock, and Steam with a compatible Proton; its output reports missing tools
+and unsupported DLLs. Tools may be obtained through Nix if installed. The translator
+is downloaded from its pinned source and built locally. DLLs and model assets are
+not distributed. Closing the launcher cancels the owned builder process group.
+Restart the game after a successful build. Existing assets are retained until the
+new set is generated; a failed/cancelled build can be retried from the same page.

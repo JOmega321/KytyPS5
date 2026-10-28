@@ -4,6 +4,7 @@
 add_executable(kyty_launcher
 	main.cpp
 	ui.cpp
+	asset-builder.cpp
 	commands.cpp
 	game.cpp
 	platform.cpp

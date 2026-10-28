@@ -31,6 +31,7 @@ set -euo pipefail
 here=$(cd -- "$(dirname -- "$0")" && pwd)
 root=$(cd -- "$here/../.." && pwd)
 cd -- "$root"
+echo "[FSR411] Checking AMD DLL and prerequisites"
 upscaler=$(realpath "${1:?upscaler DLL}")
 loader=${2:+$(realpath "$2")}
 work=$(realpath -m "${BB_FSR4CAP_WORK:-$root/out/fsr4cap}")
@@ -56,8 +57,9 @@ fi
 # distribution often has no nixpkgs channel ("file 'nixpkgs' was not found", issue #22): then
 # nixpkgs comes from the nixos-unstable channel URL.
 # Python: the one named by PYTHON (the package sets it; python3 is not on its PATH) or python3.
-needed=("$python" spirv-dis spirv-as)
-[[ -n $tools ]] || needed+=(x86_64-w64-mingw32-gcc cmake ninja gcc git)
+echo "[FSR411] Checking build tools"
+needed=("$python" spirv-dis spirv-as flock)
+[[ -n $tools ]] || needed+=(x86_64-w64-mingw32-gcc cmake ninja gcc g++ git)
 missing=()
 for tool in "${needed[@]}"; do
     command -v "$tool" >/dev/null || missing+=("$tool")
@@ -66,21 +68,35 @@ if [[ ${#missing[@]} -ne 0 && -z ${BB_FSR4CAP_SHELL:-} ]] && command -v nix-shel
     nixpkgs=()
     nix-instantiate --find-file nixpkgs >/dev/null 2>&1 || nixpkgs=(-I nixpkgs=channel:nixos-unstable)
     exec env BB_FSR4CAP_SHELL=1 nix-shell "${nixpkgs[@]}" -p pkgsCross.mingwW64.buildPackages.gcc cmake \
-        ninja gcc python3 spirv-tools git umu-launcher \
+        ninja gcc python3 spirv-tools git util-linux umu-launcher \
         --run "bash $(printf %q "$0") $(printf %q "$upscaler") ${loader:+$(printf %q "$loader")}"
 fi
 if [[ ${#missing[@]} -ne 0 ]]; then
     echo "Missing tools: ${missing[*]}. Install them (or Nix), then run this again:" >&2
-    echo "  Arch, CachyOS: sudo pacman -S mingw-w64-gcc cmake ninja python spirv-tools git" >&2
-    echo "  Fedora, Bazzite: sudo dnf install mingw64-gcc cmake ninja-build python3 spirv-tools git" >&2
-    echo "  Debian, Ubuntu: sudo apt install gcc-mingw-w64-x86-64 cmake ninja-build python3 spirv-tools git" >&2
+    echo "  Arch, CachyOS: sudo pacman -S gcc mingw-w64-gcc cmake ninja python spirv-tools git" >&2
+    echo "  Fedora, Bazzite: sudo dnf install gcc gcc-c++ mingw64-gcc cmake ninja-build python3 spirv-tools git" >&2
+    echo "  Debian, Ubuntu: sudo apt install build-essential gcc-mingw-w64-x86-64 cmake ninja-build python3 spirv-tools git" >&2
     echo "(umu-launcher is optional: without it Proton runs in Steam's own runtime.)" >&2
     exit 4
 fi
 if [[ -z ${BB_FSR4CAP_CHECKED:-} ]]; then
     check_dll
 fi
-mkdir -p "$work"
+mkdir -p "$work" "$(dirname -- "$out")"
+if [[ ${KYTY_FSR411_LOCKED:-0} != 1 ]]; then
+    # Supervisors own the locks; -o keeps Proton/Wine descendants from inheriting them.
+    status=0
+    flock -n -E 10 -o "$work/.build.lock" flock -n -E 10 -o "$out.lock" \
+        env KYTY_FSR411_LOCKED=1 bash "$0" "$upscaler" ${loader:+"$loader"} || status=$?
+    [[ $status != 10 ]] || echo "Another FSR4 asset build is using this work or output folder." >&2
+    exit "$status"
+fi
+# Restore a previous complete set if an interrupted installation left its backup.
+if [[ ! -e $out && -e $out.old ]]; then mv "$out.old" "$out"; fi
+restore_previous() { if [[ ! -e $out && -e $out.old ]]; then mv "$out.old" "$out"; fi; }
+trap restore_previous EXIT
+export PYTHONUNBUFFERED=1
+echo "[FSR411] Preparing capture and translation tools"
 # copy_in <file> <destination>: also over a read-only copy from an earlier build (the package's
 # files are read-only, and so are their copies: "cp: cannot create regular file").
 copy_in() {
@@ -106,7 +122,7 @@ else
         git -C "$dx" submodule update -q --init --recursive
         git -C "$dx" apply "$here/dxil-spirv-class-bindings.patch"
         cmake -S "$dx" -B "$dx/build" -G Ninja -DCMAKE_BUILD_TYPE=Release >/dev/null
-        ninja -C "$dx/build" dxil-spirv >/dev/null
+        ninja -C "$dx/build" dxil-spirv
     fi
     dxil_spirv=$dx/build/dxil-spirv
     # The FidelityFX API headers (MIT) are in tools/fsr4cap/ffx.
@@ -120,17 +136,18 @@ if [[ -n $loader ]]; then
     copy_in "$loader" "$work/amd_fidelityfx_loader_dx12.dll"
 fi
 
-echo "Recording the DLL's passes under Proton (20 sizes; 40 with the FP8 variant on RDNA4)..."
+echo "[FSR411] Recording the DLL's passes under Proton (20 sizes; 40 with the FP8 variant on RDNA4)..."
 bash "$here/capture_all.sh" "$work"
-echo "Translating the passes to SPIR-V..."
+echo "[FSR411] Translating and validating SPIR-V and model weights"
 rm -rf "$out.new"
 "$python" "$here/extract.py" "$dxil_spirv" "$work" "$out.new"
 if [[ ${VERIFY:-0} == 1 ]]; then
     echo "Kyty GPU verification is not available here; test the generated assets in-game." >&2
     exit 9
 fi
+echo "[FSR411] Installing completed assets"
 rm -rf "$out.old"
 [[ ! -e $out ]] || mv "$out" "$out.old"
 mv "$out.new" "$out"
 rm -rf "$out.old"
-echo "FSR 4.1.1 assets in $out; select FSR 4.1.1 in Kyty's launcher."
+echo "[FSR411] Complete: FSR 4.1.1 assets in $out; select FSR 4.1.1 in Kyty's launcher."

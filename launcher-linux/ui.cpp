@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <ctime>
 #include <cstring>
 #include <fstream>
 #include <imgui.h>
@@ -43,9 +44,9 @@ constexpr float BodySize = 15.0f, SmallSize = 13.5f, SectionSize = 16.0f, PageTi
                 BannerSize = 36.0f, GameTitleSize = 22.0f;
 
 const char* const PageNames[] {"play",    "display",  "graphics",    "game",
-                               "shaders", "advanced", "experimental"};
+                               "shaders", "advanced", "experimental", "fsrsetup"};
 const char* const PageKeys[] {"nav.play",    "nav.display",  "nav.graphics",    "nav.game",
-                              "nav.shaders", "nav.advanced", "nav.experimental"};
+                              "nav.shaders", "nav.advanced", "nav.experimental", "nav.fsrsetup"};
 
 // The window's sizes for each aspect ratio of the 3D.
 const std::vector<std::string>& Resolutions(const std::string& ratio) {
@@ -226,6 +227,7 @@ void DrawMark(Mark mark, float size) {
 
 LauncherWindow::LauncherWindow(LauncherContext& context, SDL_Renderer* renderer)
     : context_(context), commands_(context), renderer_(renderer) {
+	fsr_dll_ = S().Str("fsr4_dll");
 	game_text_      = S().Str("game");
 	extra_text_     = S().Str("extra_args");
 	wanted_taa_     = S().Int("render") > 0 ? S().Int("render") : 1440;
@@ -534,6 +536,7 @@ void LauncherWindow::Frame() {
 		case 3: GamePage(); break;
 		case 4: ShadersPage(); break;
 		case 5: AdvancedPage(); break;
+        case 7: FsrSetupPage(); break;
 		default: ExperimentalPage(); break;
 	}
 	if (page_ != 0) {
@@ -640,7 +643,7 @@ void LauncherWindow::BottomBar() {
 
 	const bool recent_notice =
 	    !notice_.empty() && std::chrono::steady_clock::now() - notice_at_ < std::chrono::seconds(6);
-	std::string summary = recent_notice ? notice_ : Summary(nullptr);
+	std::string summary = fsr_builder_.Snapshot().running ? "FSR4 assets: " + fsr_builder_.Snapshot().stage : recent_notice ? notice_ : Summary(nullptr);
 	ImGui::PushFont(nullptr, SmallSize);
 	if (ImGui::CalcTextSize(summary.c_str()).x > summary_width) {
 		while (!summary.empty() && ImGui::CalcTextSize((summary + "…").c_str()).x > summary_width) {
@@ -1073,6 +1076,8 @@ void LauncherWindow::GraphicsPage() {
     Row("fsr4.watermark", [&] { SettingSwitch("##fsr4watermark", "fsr4_watermark", S().Str("upscaler") == "fsr4"); },
         "Emulator status watermark: FSR 4.1.1 INT8 active, awaiting upscale, or FSR 3.1 fallback. Applies next launch.");
 
+    Row(nullptr, [&] { if (FlatButton("Set up FSR 4.1.1 assets...")) page_ = 7; },
+        "Choose your AMD DLL and generate the assets from the FSR4 setup page.");
 	const auto allowed  = AllowedRenderHeights();
 	const int  selected = SelectedRender();
 	// (The effective height is what is saved, as the Windows launcher's form saves it.)
@@ -1278,6 +1283,82 @@ void LauncherWindow::GamePage() {
 		    ImGui::PopStyleColor();
 	    },
 	    T("cheats.desc"));
+}
+
+// ------------------------------------------------------------ FSR4 setup
+fs::path LauncherWindow::FsrAssetFolder() const {
+    if (const char* path = std::getenv("KYTY_FSR411_DIR"); path && *path) return fs::absolute(path);
+    return context_.root / "fsr4_411";
+}
+void LauncherWindow::PrepareFsrAssets(const std::string& dll) {
+    fsr_dll_ = dll; page_ = 7; StartFsrAssets();
+}
+void LauncherWindow::StartFsrAssets() {
+    std::error_code error;
+    const auto dll = fs::absolute(Trim(fsr_dll_)).lexically_normal();
+    if (!fs::is_regular_file(dll, error)) { Message("Choose an existing AMD upscaler DLL first."); return; }
+    fs::path script = Platform::ExecutableFolder() / "tools/fsr4cap/build_assets.sh";
+    if (const char* path = std::getenv("KYTY_FSR411_BUILD_SCRIPT"); path && *path) script = path;
+    if (!fs::is_regular_file(script, error)) script = context_.root / "tools/fsr4cap/build_assets.sh";
+    if (!fs::is_regular_file(script, error)) { Message("The FSR4 capture tools are missing from this installation."); return; }
+    S().Set("fsr4_dll", dll.string()); S().Save();
+    const auto log = context_.LogsFolder() / ("fsr411-build-" + std::to_string(std::time(nullptr)) + ".log");
+    const auto work = context_.root / "out/fsr4cap";
+    fsr_started_ = std::chrono::steady_clock::now();
+    fsr_builder_.Start({"env", "BB_FSR411_OUT=" + FsrAssetFolder().string(), "BB_FSR4CAP_WORK=" + work.string(),
+        "BB_FSR4CAP_FP8=0", "PYTHONUNBUFFERED=1", "bash", script.string(), dll.string()}, log, [] { Wake(); });
+}
+void LauncherWindow::FsrSetupPage() {
+    PageTitle("nav.fsrsetup");
+    auto status = fsr_builder_.Snapshot();
+    Desc("Generate the native FSR 4.1.1 INT8 assets from your own AMD upscaler DLL. Steam and a compatible Proton are required for this one-time preparation; gameplay stays native Linux.");
+    Row("fsrsetup.dll", [&] {
+        ImGui::BeginDisabled(status.running);
+        ImGui::SetNextItemWidth(-1);
+        if (ImGui::InputTextWithHint("##fsrdll", "amd_fidelityfx_upscaler_dx12.dll (4.1.1)", &fsr_dll_)) {
+            S().Set("fsr4_dll", Trim(fsr_dll_)); Changed();
+        }
+        if (FlatButton("Choose DLL...")) PickFolder(false, false, true);
+        ImGui::EndDisabled();
+    }, "The DLL is checked before capture. Missing host tools, Proton, or an incompatible DLL are explained in the build output.");
+    Row("fsrsetup.build", [&] {
+        if (FlatButton("Build FSR4 INT8 assets", !status.running && !Trim(fsr_dll_).empty())) StartFsrAssets();
+        ImGui::SameLine();
+        if (FlatButton("Cancel", status.running)) fsr_builder_.Cancel();
+    });
+    ImGui::PushTextWrapPos(0);
+    ImGui::TextUnformatted(status.stage.c_str());
+    if (status.running) {
+        const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - fsr_started_).count();
+        ImGui::Text("Elapsed: %lld:%02lld - stage progress, no estimated completion time", static_cast<long long>(seconds / 60), static_cast<long long>(seconds % 60));
+        ImGui::ProgressBar(-static_cast<float>(ImGui::GetTime()), {-1, 0}, "Working...");
+    }
+    static auto checked = std::chrono::steady_clock::time_point{};
+    static fs::path checked_path;
+    static bool installed = false;
+    static bool was_running = false;
+    const auto now = std::chrono::steady_clock::now();
+    if (checked_path != FsrAssetFolder() || (was_running && !status.running) || now - checked > std::chrono::seconds(1)) {
+        checked_path = FsrAssetFolder(); installed = AssetBuilder::Installed(checked_path); checked = now;
+    }
+    was_running = status.running;
+    if (!status.running && status.exit_code == 0)
+        ImGui::TextUnformatted(installed ? "Success: complete INT8 assets found. Restart the game to use them." : "The script exited successfully, but the INT8 assets are incomplete. See the log.");
+    else ImGui::TextUnformatted(installed ? "Complete INT8 assets found on disk." : "No complete INT8 asset set found yet.");
+    ImGui::Text("Assets: %s", FsrAssetFolder().c_str());
+    if (!status.log_path.empty()) ImGui::Text("Full log: %s", status.log_path.c_str());
+    ImGui::PopTextWrapPos();
+    std::error_code folder_error;
+    if (FlatButton("Open asset folder", fs::is_directory(FsrAssetFolder(), folder_error))) Platform::Open(FsrAssetFolder().string());
+    ImGui::SameLine();
+    if (FlatButton("Open build log", !status.log_path.empty())) Platform::Open(status.log_path);
+    bool follow = S().Bool("fsr4_log_follow");
+    if (ImGui::Checkbox("Follow output", &follow)) { S().Set("fsr4_log_follow", follow); Changed(); }
+    ImGui::BeginChild("##fsrbuildlog", {0, 240.0f * scale_}, ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar);
+    ImGui::TextUnformatted(status.output.empty() ? "Build output will appear here, including capture counts and any errors." : status.output.c_str());
+    if (follow) ImGui::SetScrollHereY(1.0f);
+    ImGui::EndChild();
+    Desc("A complete asset set does not prove GPU support or correct rendering. If the game still falls back, check its log for the reason. Closing the launcher cancels an active build.");
 }
 
 // ------------------------------------------------------------ Shaders
@@ -1633,6 +1714,7 @@ void LauncherWindow::StartInTerminal(const Launch& launch) {
 }
 
 void LauncherWindow::Play() {
+    if (fsr_builder_.Snapshot().running) { Message("Wait for the FSR4 asset build to finish or cancel it first."); return; }
 	S().Set("game", Trim(game_text_));
 	S().Save();
 	const auto  launch = commands_.Play(game_, false);
@@ -1736,7 +1818,8 @@ void LauncherWindow::Poll() {
 		const auto chosen = Trim(picker_job_->value);
 		picker_job_       = nullptr;
 		if (!chosen.empty()) {
-			if (picker_cache_) {
+			if (picker_dll_) { fsr_dll_ = chosen; S().Set("fsr4_dll", chosen); Changed(); }
+            else if (picker_cache_) {
                 S().Set("shader_cache_dir", chosen); Changed(); CheckStore(true);
             } else { game_text_ = chosen; LoadGame(chosen); }
 		}
@@ -1753,10 +1836,11 @@ void LauncherWindow::Poll() {
 
 // The desktop's own dialog (kdialog on KDE, zenity or qarma elsewhere), off the window's thread;
 // the built-in browser without one.
-void LauncherWindow::PickFolder(bool zar, bool cache) {
+void LauncherWindow::PickFolder(bool zar, bool cache, bool dll) {
 	if (picker_job_ != nullptr) return;
 	picker_cache_ = cache;
-	const auto current = cache ? S().Str("shader_cache_dir") : Trim(game_text_);
+    picker_dll_ = dll;
+	const auto current = dll ? fsr_dll_ : cache ? S().Str("shader_cache_dir") : Trim(game_text_);
 	std::error_code error;
 	fs::path        start = current.empty() ? fs::path() : fs::path(current);
 	if (!start.empty() && !fs::is_directory(start, error)) start = start.parent_path();
@@ -1768,18 +1852,20 @@ void LauncherWindow::PickFolder(bool zar, bool cache) {
 	if (const char* value = std::getenv("XDG_CURRENT_DESKTOP"); value != nullptr)
 		desktop = Lower(value);
 	const bool               kde   = desktop.find("kde") != std::string::npos;
-	const auto               title = std::string(cache ? "Shader cache folder" : T(zar ? "dialog.zar" : "dialog.game"));
+	const auto               title = std::string(dll ? "Choose AMD FSR 4.1.1 upscaler DLL" : cache ? "Shader cache folder" : T(zar ? "dialog.zar" : "dialog.game"));
 	std::vector<std::string> argv;
 	auto                     zenity = [&](const std::string& program) {
         argv = {program, "--file-selection", "--title=" + title,
                 "--filename=" + (start / "").string()};
-        if (zar)
+        if (dll) argv.emplace_back("--file-filter=AMD upscaler DLL (*.dll) | *.dll");
+        else if (zar)
             argv.emplace_back("--file-filter=ZArchive (*.zar) | *.zar");
         else
             argv.emplace_back("--directory");
 	};
 	auto kdialog = [&] {
-		if (zar)
+		if (dll) argv = {"kdialog", "--title", title, "--getopenfilename", start.string(), "*.dll|AMD upscaler DLL"};
+        else if (zar)
 			argv = {"kdialog",           "--title",      title,
 			        "--getopenfilename", start.string(), "*.zar|ZArchive (*.zar)"};
 		else
@@ -1923,7 +2009,7 @@ void LauncherWindow::Modals() {
 	                           ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
 	                               ImGuiWindowFlags_NoMove)) {
 		ImGui::PushFont(serif_, 22.0f);
-		ImGui::TextUnformatted(T(browser_zar_ ? "dialog.zar" : "dialog.game"));
+		ImGui::TextUnformatted(picker_dll_ ? "Choose AMD FSR 4.1.1 upscaler DLL" : T(browser_zar_ ? "dialog.zar" : "dialog.game"));
 		ImGui::PopFont();
 		std::error_code error;
 		fs::path        dir(browser_path_);
@@ -1949,7 +2035,8 @@ void LauncherWindow::Modals() {
 			if (name.empty() || name[0] == '.') continue;
 			if (entry.is_directory(error))
 				dirs.push_back(entry.path());
-			else if (browser_zar_ && Lower(entry.path().extension().string()) == ".zar")
+			else if ((browser_zar_ && Lower(entry.path().extension().string()) == ".zar") ||
+                     (picker_dll_ && Lower(entry.path().extension().string()) == ".dll"))
 				files.push_back(entry.path());
 		}
 		std::sort(dirs.begin(), dirs.end());
@@ -1968,8 +2055,8 @@ void LauncherWindow::Modals() {
 			                      ImGuiSelectableFlags_AllowDoubleClick)) {
 				browser_selected_ = path.string();
 				if (ImGui::IsMouseDoubleClicked(0)) {
-					game_text_ = browser_selected_;
-					LoadGame(game_text_);
+					if (picker_dll_) { fsr_dll_ = browser_selected_; S().Set("fsr4_dll", fsr_dll_); Changed(); }
+                    else { game_text_ = browser_selected_; LoadGame(game_text_); }
 					ImGui::CloseCurrentPopup();
 				}
 			}
@@ -1980,12 +2067,13 @@ void LauncherWindow::Modals() {
 			browser_selected_ = "";
 		}
 		const bool can_choose =
-		    browser_zar_ ? !browser_selected_.empty() : fs::is_directory(dir, error);
+		    (browser_zar_ || picker_dll_) ? !browser_selected_.empty() : fs::is_directory(dir, error);
 		ImGui::SetCursorPosX(ImGui::GetWindowWidth() - 330.0f * scale_);
 		ImGui::BeginDisabled(!can_choose);
 		if (ImGui::Button(T(browser_zar_ ? "picker.open" : "picker.choose"),
 		                  {200.0f * scale_, 0})) {
-			if (picker_cache_) {
+			if (picker_dll_) { fsr_dll_ = browser_selected_; S().Set("fsr4_dll", fsr_dll_); Changed(); }
+            else if (picker_cache_) {
                 S().Set("shader_cache_dir", dir.string()); Changed(); CheckStore(true);
             } else {
                 game_text_ = browser_zar_ ? browser_selected_ : dir.string();

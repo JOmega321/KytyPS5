@@ -2,6 +2,7 @@
 #define KYTY_LAUNCHER_LINUX_UI_H
 
 #include "commands.h"
+#include "asset-builder.h"
 #include "game.h"
 #include "platform.h"
 
@@ -38,9 +39,11 @@ public:
 	void Activated();
 
 	[[nodiscard]] bool WantsClose() const { return close_; }
+    void PrepareFsrAssets(const std::string& dll);
+    bool AssetBuildRunning() const { return fsr_builder_.Snapshot().running; }
 	// (--screenshot.)
 	void               ShowPage(int index) { page_ = index; }
-	static int         PageCount() { return 7; }
+	static int         PageCount() { return 8; }
 	static const char* PageName(int index);
 
 	// Called from other threads when their work is done: wakes the window up (an SDL user event).
@@ -59,6 +62,9 @@ private:
 	void PlayPage();
 	void DisplayPage();
 	void GraphicsPage();
+    void FsrSetupPage();
+    fs::path FsrAssetFolder() const;
+    void StartFsrAssets();
 	void GamePage();
 	void ShadersPage();
 	void AdvancedPage();
@@ -87,7 +93,7 @@ private:
 	void Play();
 	void StartInTerminal(const Launch& launch);
 	void Message(const std::string& text);
-	void PickFolder(bool zar, bool cache = false);
+	void PickFolder(bool zar, bool cache = false, bool dll = false);
 	void OpenCheats();
 
 	// The Graphics page's rules (launcher-windows MainWindow: SelectRenderHeight,
@@ -149,6 +155,10 @@ private:
 	bool                              message_open_ = false;
 	std::shared_ptr<Job<std::string>> picker_job_;
 	bool        picker_cache_ = false;
+    bool picker_dll_ = false;
+    AssetBuilder fsr_builder_;
+    std::string fsr_dll_;
+    std::chrono::steady_clock::time_point fsr_started_ {};
 	bool        browser_open_ = false; // the built-in folder browser (no zenity or kdialog)
 	bool        browser_zar_  = false;
 	std::string browser_path_;

@@ -17,6 +17,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends clang lld ninja-build cmake glslang-tools patchelf desktop-file-utils xvfb xauth fonts-dejavu-core libvulkan1 libgl1-mesa-dev libx11-dev libxcursor-dev libxext-dev libxfixes-dev libxi-dev libxrandr-dev libxss-dev libxkbcommon-dev libasound2-dev libpulse-dev libudev-dev libdbus-1-dev libwayland-dev wayland-protocols
+      - name: Test asset-builder process handling
+        run: |
+          clang++ -std=c++20 -pthread -Ilauncher-linux launcher-linux/asset-builder.cpp tests/launcher-asset-builder.cpp -o /tmp/test-asset-builder
+          /tmp/test-asset-builder
+          bash -n tools/fsr4cap/build_assets.sh packaging/chen-appimage/AppRun
       - name: Configure and build native programs
         run: |
           cmake -S . -B _Build/appimage -G Ninja -DCMAKE_BUILD_TYPE=Release \
@@ -96,7 +101,19 @@ jobs:
           grep -q "KYTY_SHADER_WARMUP_BACKGROUND_THREADS='1'" _Build/final-launch.log
           grep -q "KYTY_SHADER_WARMUP_BACKGROUND='0'" _Build/final-launch.log
           APPIMAGE_EXTRACT_AND_RUN=1 SDL_VIDEODRIVER=x11 xvfb-run -a "$image" --screenshot "$PWD/_Build/screenshots" > _Build/final-gui.log 2>&1
-          test "$(find _Build/screenshots -name '*.bmp' | wc -l)" -ge 7
+          test "$(find _Build/screenshots -name '*.bmp' | wc -l)" -ge 8
+          # Exercise the actual GUI-to-builder path with a controlled dependency failure.
+          mkdir -p _Build/setup-failure
+          printf '%s\n' "echo '[FSR411] Checking build tools'" "echo 'Missing tools: test dependency' >&2" 'exit 4' > _Build/mock-asset-build.sh
+          printf 'not a DLL' > _Build/test.dll
+          KYTY_FSR411_BUILD_SCRIPT="$PWD/_Build/mock-asset-build.sh" APPIMAGE_EXTRACT_AND_RUN=1 SDL_VIDEODRIVER=x11 timeout 30s xvfb-run -a "$image" --prepare-fsr411 "$PWD/_Build/test.dll" --screenshot "$PWD/_Build/setup-failure" > _Build/setup-failure.log 2>&1
+          grep -q 'Missing tools: test dependency' "$XDG_DATA_HOME"/KytyPS5-chenxiao07/logs/fsr411-build-*.log
+          test -f _Build/setup-failure/8-fsrsetup.bmp
+          # The real packaged capture script must reject an invalid DLL before capture.
+          status=0
+          APPIMAGE_EXTRACT_AND_RUN=1 "$image" --build-fsr411 "$PWD/_Build/test.dll" > _Build/invalid-dll.log 2>&1 || status=$?
+          test "$status" -eq 2
+          grep -q 'Not usable:' _Build/invalid-dll.log
           cd _Build
           "$image" --appimage-extract > /dev/null
           ./squashfs-root/AppRun --emulator --help > extracted-help.log
@@ -116,6 +133,7 @@ jobs:
           path: |
             _Build/*.log
             _Build/screenshots/
+            _Build/setup-failure/
             _Build/native-stage.tar.gz
             _Build/appimage/CMakeCache.txt
           if-no-files-found: ignore
