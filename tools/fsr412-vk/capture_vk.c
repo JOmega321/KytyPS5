@@ -113,7 +113,11 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceFeatures2(VkPhysicalDevice d,VkPhy
     }
 }
 VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceMemoryProperties(VkPhysicalDevice d,VkPhysicalDeviceMemoryProperties *p) {
-    (void)d;memset(p,0,sizeof(*p));p->memoryTypeCount=1;p->memoryTypes[0].propertyFlags=VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT|VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT|VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
+    (void)d;memset(p,0,sizeof(*p));p->memoryTypeCount=2;
+    // SDK findMemoryTypeIndex deliberately excludes HOST_VISIBLE heaps when asking
+    // for device-local memory. Keep the simulated upload and invisible heaps separate.
+    p->memoryTypes[0].propertyFlags=VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+    p->memoryTypes[1].propertyFlags=VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT|VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
     p->memoryHeapCount=1;p->memoryHeaps[0].size=8ull<<30;p->memoryHeaps[0].flags=VK_MEMORY_HEAP_DEVICE_LOCAL_BIT;
 }
 static const char *extensions[]={"VK_EXT_subgroup_size_control","VK_KHR_shader_float16_int8","VK_KHR_shader_integer_dot_product","VK_KHR_compute_shader_derivatives","VK_VALVE_shader_mixed_float_dot_product","VK_KHR_storage_buffer_storage_class","VK_KHR_16bit_storage","VK_KHR_8bit_storage","VK_KHR_maintenance1","VK_KHR_maintenance2","VK_EXT_shader_float8","VK_KHR_cooperative_matrix"};
@@ -146,7 +150,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateImage(VkDevice d,const VkImageCreateInfo 
     (void)d;(void)a;uint64_t h=make();*out=(VkImage)(uintptr_t)h;Object *o=objects+h;o->width=p->extent.width;o->height=p->extent.height;o->depth=p->extent.depth;o->format=p->format;o->mips=p->mipLevels;o->usage=p->usage;o->size=(uint64_t)o->width*o->height*o->depth*16;
     LOG("{\"op\":\"image\",\"id\":%"PRIu64",\"format\":%u,\"width\":%u,\"height\":%u,\"depth\":%u,\"mips\":%u,\"usage\":%u}\n",h,o->format,o->width,o->height,o->depth,o->mips,o->usage);return VK_SUCCESS;
 }
-VKAPI_ATTR void VKAPI_CALL vkGetBufferMemoryRequirements(VkDevice d,VkBuffer b,VkMemoryRequirements *p) { (void)d;p->size=(OBJ(b).size+255)&~255ull;p->alignment=256;p->memoryTypeBits=1; }
+VKAPI_ATTR void VKAPI_CALL vkGetBufferMemoryRequirements(VkDevice d,VkBuffer b,VkMemoryRequirements *p) { (void)d;p->size=(OBJ(b).size+255)&~255ull;p->alignment=256;p->memoryTypeBits=3; }
 VKAPI_ATTR void VKAPI_CALL vkGetImageMemoryRequirements(VkDevice d,VkImage b,VkMemoryRequirements *p) { vkGetBufferMemoryRequirements(d,(VkBuffer)b,p); }
 VKAPI_ATTR void VKAPI_CALL vkGetBufferMemoryRequirements2(VkDevice d,const VkBufferMemoryRequirementsInfo2 *b,VkMemoryRequirements2 *p) { vkGetBufferMemoryRequirements(d,b->buffer,&p->memoryRequirements); }
 VKAPI_ATTR VkResult VKAPI_CALL vkAllocateMemory(VkDevice d,const VkMemoryAllocateInfo *p,const VkAllocationCallbacks *a,VkDeviceMemory *out) {
