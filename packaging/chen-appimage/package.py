@@ -13,7 +13,8 @@ build = pathlib.Path(sys.argv[1]).resolve()
 appdir = pathlib.Path(sys.argv[2]).resolve()
 payload = appdir / 'usr/payload'
 payload.mkdir(parents=True)
-subprocess.run(['cmake', '--install', str(build), '--prefix', str(payload)], check=True)
+subprocess.run(['cmake', '-DCMAKE_INSTALL_PREFIX=' + str(payload),
+                '-DCMAKE_INSTALL_LOCAL_ONLY=1', '-P', str(build / 'cmake_install.cmake')], check=True)
 for name in ('kyty_launcher', 'kyty_shader_precompile'):
     shutil.copy2(build / name, payload / name)
 for source, target in [('tools/local/run_ds.sh', 'run_ds.sh'), ('precompile-linux.sh', 'precompile-linux.sh'),
@@ -53,7 +54,7 @@ with (payload / 'build-manifest.txt').open('a') as manifest:
     for archive in sorted((build / 'externals').glob('*.zip')):
         manifest.write(archive.name + ': sha256 ' + hashlib.sha256(archive.read_bytes()).hexdigest() + '\n')
 libdir = payload / 'lib'
-libdir.mkdir()
+libdir.mkdir(exist_ok=True)
 host = re.compile(r'^(ld-linux|lib(c|m|pthread|dl|rt|resolv|util)\.so|lib(GL|EGL|GLX|GLdispatch|OpenGL|vulkan|drm|gbm))')
 pending = [payload / name for name in ('kyty_emulator', 'kyty_launcher', 'kyty_shader_precompile')]
 seen = set()
@@ -81,7 +82,7 @@ while pending:
                     shutil.copy2(notice, payload / 'LICENSES' / (package + '-copyright.txt'))
                     break
         pending.append(target)
-for elf in [*libdir.iterdir(), *(payload / n for n in ('kyty_emulator', 'kyty_launcher', 'kyty_shader_precompile'))]:
+for elf in [*(p for p in libdir.iterdir() if p.is_file()), *(payload / n for n in ('kyty_emulator', 'kyty_launcher', 'kyty_shader_precompile'))]:
     rpath = '$ORIGIN' if elf.parent == libdir else '$ORIGIN/lib'
     subprocess.run(['patchelf', '--set-rpath', rpath, str(elf)], check=True)
 for source in ('AppRun', 'kytyps5.desktop', 'kytyps5.svg'):
