@@ -4,7 +4,9 @@ This branch applies https://github.com/KytyPS5/KytyPS5/pull/1747 at head
 `930d50b208427417630849a5d2e23c6da7e22776` to the existing AppImage baseline
 (upstream `1be1c6c4f928e52f740ae7f76841c1da74220e54`). It retains later upstream
 changes during the three-way patch application. The stable `appimage` branch
-is unchanged. The PR is unmerged and gameplay on AMD/Linux is not established.
+is unchanged. The integration also extends the newer baseline's BufferResource
+serializer for the two added fields, with a cache round-trip regression test.
+The PR is unmerged and gameplay on AMD/Linux is not established.
 
 Download `KytyPS5-PR1747-test-x86_64` from the successful Actions run, extract
 it, mark the AppImage executable, and add your game folder in the fresh launcher.

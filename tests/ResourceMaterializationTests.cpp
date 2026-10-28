@@ -34,6 +34,25 @@ Extract(const Libs::Graphics::ShaderRecompiler::IR::Program &program) {
   return loaded;
 }
 
+void TestIndexedWritePatternCacheRoundTrip() {
+  using namespace Libs::Graphics::ShaderRecompiler::IR;
+  for (const bool unknown : {false, true}) {
+    BufferResource original{};
+    original.written = true;
+    original.atomic = true;
+    original.packed_stride = 64;
+    original.indexed_write_patterns = {{24, 4}, {40, 8}};
+    original.unknown_write_pattern = unknown;
+    Writer writer;
+    Io(writer, original);
+    Reader reader{writer.bytes};
+    BufferResource loaded{};
+    Io(reader, loaded);
+    Check(reader.ok && reader.bytes.empty() && loaded == original,
+          "indexed buffer-write metadata was lost from shader cache records");
+  }
+}
+
 bool RejectSpecializationRead(void *userdata, uint64_t, std::span<uint32_t>) {
   ++*static_cast<uint32_t *>(userdata);
   return false;
@@ -1486,6 +1505,7 @@ void DbgExit(int) { std::abort(); }
 } // namespace Common
 
 int main() {
+  TestIndexedWritePatternCacheRoundTrip();
   TestWalkerLoadsBypassSpecializationReader();
   TestNativeNestedSrtRefresh();
   TestIntegerRuntimeValueFollowsSrtReads();

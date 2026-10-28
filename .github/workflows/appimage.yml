@@ -58,15 +58,19 @@ jobs:
             grep -qE "^--   ${feature} +\\(Wanted: ON\\): ON" configure.log
           done
 
-      - name: Build and install
+      - name: Build shader regression tests
         run: |
-          cmake --build _Build/appimage --target launcher resource_tracking_tests resource_materialization_tests --parallel "$(nproc)"
-          cmake --install _Build/appimage --prefix "$PWD/_Build/appimage/install"
+          cmake --build _Build/appimage --target resource_tracking_tests resource_materialization_tests --parallel "$(nproc)"
 
       - name: Test shader resource tracking and materialization
         run: |
           ctest --test-dir _Build/appimage --output-on-failure \
             -R '^(resource_tracking|resource_materialization)$' 2>&1 | tee resource-tests.log
+
+      - name: Build and install
+        run: |
+          cmake --build _Build/appimage --target launcher --parallel "$(nproc)"
+          cmake --install _Build/appimage --prefix "$PWD/_Build/appimage/install"
 
       - name: Package
         run: |
