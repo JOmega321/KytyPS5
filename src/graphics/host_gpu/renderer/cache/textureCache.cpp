@@ -86,9 +86,9 @@ constexpr uint64_t PartialDirtyCandidateSize = 2 * PartialDirtyGranule;
 constexpr uint64_t PartialUploadMaxShare = 2;
 // Staged runs of picked subresources closer than this are staged as one run.
 constexpr uint64_t PartialStageGap = uint64_t {64} << 10;
-// UploadImageChunked: images from this size whose bytes no cached buffer holds whole, uploaded this much of guest
-// memory at a time.
-constexpr uint64_t ChunkedUploadMin   = uint64_t {256} << 20;
+// UploadImageChunked: images from this size (or half the staging ring, where that is less: an image past it would take
+// a buffer of its own size) whose bytes no cached buffer holds whole, uploaded this much of guest memory at a time.
+constexpr uint64_t ChunkedUploadMax   = uint64_t {256} << 20;
 constexpr uint64_t ChunkedUploadPiece = uint64_t {64} << 20;
 
 [[nodiscard]] bool DecodeDccClear(const TextureCache::ImageDesc& desc, vk::Format format,
@@ -2209,8 +2209,8 @@ void TextureCache::InitializeImage(ImageId id) {
 			if (image.IsBufferModified()) {
 				for (const auto& [begin, end]: image.BufferModifiedRanges()) Image::AddRange(ranges, begin, end);
 			}
-			uploaded = image.info.data.size >= ChunkedUploadMin ? UploadImageChunked(image, &ranges)
-			                                                    : UploadImageSubresources(image, ranges);
+			uploaded = image.info.data.size >= ChunkedUploadMin() ? UploadImageChunked(image, &ranges)
+			                                                      : UploadImageSubresources(image, ranges);
 			if (uploaded) image.staged_ring = nullptr;
 		}
 		if (!uploaded && UploadImageChunked(image)) {
@@ -2460,11 +2460,15 @@ bool TextureCache::UploadImageSubresources(Image& image, const std::vector<std::
 // buffer: one each lived until the submission completed, as much again. (An image a cached buffer holds whole too: its
 // pieces copy from that buffer, where its whole detile asked for a scratch buffer of the image's size - a user's 8 GB
 // GPU had neither the video nor the system memory for one of 2 GiB, and the emulator exited, 10-13.)
+uint64_t TextureCache::ChunkedUploadMin() const {
+	return std::min(ChunkedUploadMax, std::max(m_buffer_cache.StagingSize() / 2, ChunkedUploadPiece));
+}
+
 bool TextureCache::UploadImageChunked(Image& image, const std::vector<std::pair<uint64_t, uint64_t>>* only) {
 	const auto& info    = image.info;
 	const auto  binding = UploadBinding(image);
 	const auto  base    = info.data.address;
-	if (binding == BindingType::DepthTarget || (only == nullptr && info.data.size < ChunkedUploadMin) ||
+	if (binding == BindingType::DepthTarget || (only == nullptr && info.data.size < ChunkedUploadMin()) ||
 	    info.IsVolume() || base % 256 != 0) {
 		return false;
 	}
@@ -3823,6 +3827,11 @@ void TextureCache::InvalidateMemory(uint64_t address, uint64_t size) {
 		EXIT("TextureCache: invalid memory-invalidation range\n");
 	}
 	std::scoped_lock lock {m_lock};
+	// (KYTY_SLOW_LOG_MS: the time under the lock, which the render thread waits for.)
+	SlowLog::Scope slow([&](double ms) {
+		std::printf("SLOW TextureCache::InvalidateMemory %.1f ms under its lock addr=0x%llx size=0x%llx\n", ms,
+		            static_cast<unsigned long long>(address), static_cast<unsigned long long>(size));
+	});
 	ReleaseDownloadPages(address, size);
 	InvalidateCpuAliases(address, size);
 }
@@ -4972,7 +4981,7 @@ void TextureCache::EraseSlot(ImageId id) {
 // Passed over (to the back of the list): images whose bytes only the GPU has (no download here), depth images with a
 // stencil association (deleting depth deletes it too), unregistered ones.
 // Texture pools of the world the game is in stay where the budget is 12 GiB or more (the collector below takes them,
-// oldest first, when it runs): one-level arrays of ChunkedUploadMin and up that shaders only sample. The game samples a
+// oldest first, when it runs): one-level arrays of ChunkedUploadMax and up that shaders only sample. The game samples a
 // pool through views from a few first layers to a last one that moves as it streams, and leaves one for minutes as the
 // camera moves on: retired, the next view made it again whole from guest memory (2-2 and 5-2 tours: 1.3-2 GB, 150-460
 // ms frames, 2-3 times a map), where the image kept serves it or gives its layers on the GPU (HoldLayers). A kept
@@ -4996,7 +5005,7 @@ void TextureCache::RetireStaleImages(uint64_t tick) {
 		if (owner == nullptr || !owner->registered) return false;
 		// (Left at its age: the collector's.)
 		if (keep_pools && owner->info.resources.levels == 1 && owner->info.resources.layers > 1 &&
-		    owner->info.data.size >= ChunkedUploadMin && GuestTexture(*owner) &&
+		    owner->info.data.size >= ChunkedUploadMax && GuestTexture(*owner) &&
 		    m_lru_cache.TickOf(owner->lru_id) >= m_scene_tick)
 			return false;
 		if (owner->depth_id || owner->IsGpuModified())

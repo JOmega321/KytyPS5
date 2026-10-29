@@ -214,6 +214,10 @@ struct UpscaleImage {
 };
 struct UpscaleInputs {
 	UpscaleImage color, depth, motion, output; // color, depth and motion at the render size
+	// The game's reactive mask at the render size (no image: none): 1 where a pixel takes the frame's color, not its
+	// history (effects drawn with a pattern that changes every frame). DLSS's bias towards the current color (Windows),
+	// FSR 3's reactive mask.
+	UpscaleImage reactive;
 	float        jitter_x = 0.0f, jitter_y = 0.0f;       // the projection's offset, in render pixels
 	float        motion_scale_x = 0.0f, motion_scale_y = 0.0f; // motion vector * scale = render pixels to the previous
 	bool         reset = false;                           // no history (a cut, a level load)

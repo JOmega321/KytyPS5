@@ -36,6 +36,8 @@
 #include "slow-log.h"
 #include "time-census.h"
 
+#include "SDL.h"
+
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -669,6 +671,23 @@ inline void Run(uint64_t id, const std::string& line) {
 		std::printf("LIVE_SET id=%" PRIu64 " %s=%s ok=%d\n", id, arg1, arg2, ok ? 1 : 0);
 	} else if (cmd == "sleep" && n >= 2) {
 		std::this_thread::sleep_for(std::chrono::duration<double>(std::strtod(arg1, nullptr)));
+	} else if (cmd == "key" && n >= 2) {
+		// key <SDL key name> [seconds]: a key typed into the game window, as SDL events pushed on its queue (no window
+		// focus needed), e.g. `key F11`.
+		const SDL_Keycode code = SDL_GetKeyFromName(arg1);
+		if (code != SDLK_UNKNOWN) {
+			SDL_Event event {};
+			event.type                = SDL_KEYDOWN;
+			event.key.state           = SDL_PRESSED;
+			event.key.keysym.sym      = code;
+			event.key.keysym.scancode = SDL_GetScancodeFromKey(code);
+			SDL_PushEvent(&event);
+			std::this_thread::sleep_for(std::chrono::duration<double>(n >= 3 ? std::strtod(arg2, nullptr) : 0.1));
+			event.type      = SDL_KEYUP;
+			event.key.state = SDL_RELEASED;
+			SDL_PushEvent(&event);
+		}
+		std::printf("LIVE_KEY id=%" PRIu64 " key=%s ok=%d\n", id, arg1, code != SDLK_UNKNOWN ? 1 : 0);
 	} else if (cmd == "capture" && n >= 2) {
 		// capture <dir> [frames] [hash,hash,...]: every draw/dispatch of the next frames, with
 		// the constants of the listed shaders (frame-capture.h).

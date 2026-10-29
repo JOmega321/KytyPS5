@@ -23,12 +23,31 @@
 #include <cstring>
 #include <iterator>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <thread>
 #include <vector>
 #include <x86intrin.h>
 
 extern "C" {
 extern volatile std::atomic<uint32_t> kyty_local_async_upload_mode;
+// KYTY_UPLOAD_HELP (live kyty_local_upload_help): whether the render thread's Drain runs the jobs the upload worker is not
+// at itself (Worker::Help): 1 always (the Steam Deck build's default), 0 never, 2 (the default elsewhere) while the
+// process's CPUs are busy, the spin gate shut (fewer than three of them idle, spin-gate.h). On the Deck's four cores the
+// worker, asleep or waiting for a CPU, left the render thread waiting 7.2-7.7 ms a frame, 1.1-1.3 with it helping (stand
+// 30.5 -> 32.8 fps). The 22-CPU desktop held to six of them: the wait 1.8-1.9 -> 0.6 ms, 63.7-66.3 -> 66.6-68.5 fps at
+// 1-1, the same lows; to four: 4.1-4.4 -> 0.9-1.0 ms, +4% (the jobs at normal priority: Help). With CPUs to spare the
+// worker is at its jobs at once, and the render thread taking them gained nothing and made the 1% lows worse (10-27).
+inline volatile std::atomic<uint32_t> kyty_local_upload_help {[] {
+	const char* value = std::getenv("KYTY_UPLOAD_HELP");
+	if (value != nullptr && (value[0] == '0' || value[0] == '1' || value[0] == '2') && value[1] == '\0')
+		return static_cast<uint32_t>(value[0] - '0');
+#if defined(KYTY_STEAM_DECK)
+	return 1u;
+#else
+	return 2u;
+#endif
+}()};
 }
 
 namespace AsyncUpload {
@@ -104,6 +123,42 @@ public:
 		note();
 	}
 
+	// Render thread (Drain): as Wait, but the jobs up to `sequence` that the worker is not at (asleep, or not yet given a
+	// CPU) are run here, in queue order: on the Steam Deck's four cores the render thread waited ~7 ms a frame for jobs
+	// the worker ran in ~3.6 ms. Only write protections and copies: a call of another kind (a read through the guest's
+	// mapping, which may fault into a readback) is left to the worker, and waited for.
+	void Help(uint64_t sequence) {
+		if (m_done.load(std::memory_order_acquire) >= sequence) return;
+		const auto start = std::chrono::steady_clock::now();
+		// The jobs at the worker's priority, not the render thread's above the game's threads: held to four CPUs, the game's
+		// threads starved behind them, frames of 100-500 ms with the render thread idle (1-1, 1% lows 25-45 -> 7-13 fps;
+		// at normal priority the lows as without the help, +4% fps). (The Steam Deck build keeps the render thread's core
+		// for it alone, KYTY_RENDER_CORE: nothing of the game's runs there.)
+		std::optional<LocalPlatform::NormalPriority> normal;
+		for (int spin = 0; m_done.load(std::memory_order_acquire) < sequence;) {
+			if (m_process.try_lock()) {
+#if !defined(KYTY_STEAM_DECK)
+				if (!normal) normal.emplace();
+#endif
+				const uint64_t done = m_done.load(std::memory_order_relaxed);
+				const uint64_t head = m_head.load(std::memory_order_acquire);
+				const uint64_t ran  = done < head ? Process(done, head, true) : done;
+				m_process.unlock();
+				if (ran == done) break; // (the next job is the worker's)
+				continue;
+			}
+			if (++spin >= 4000) break; // (the worker is at them)
+			_mm_pause();
+		}
+		normal.reset();
+		const auto helped = (std::chrono::steady_clock::now() - start).count();
+		if (m_done.load(std::memory_order_acquire) < sequence) {
+			Kick();
+			Wait(sequence);
+		}
+		LiveCounters::Add(LiveCounters::UploadHelpUs, static_cast<uint64_t>(helped) / 1000u);
+	}
+
 private:
 	struct Job {
 		uint8_t*       destination;
@@ -133,13 +188,14 @@ private:
 		LocalPlatform::PinThreadToCpuList(std::getenv("KYTY_RECORDING_CPUS"));
 		// Pause iterations the worker polls for new copies before it sleeps (while its CPUs idle: spin-gate.h).
 		constexpr uint32_t UploadSpins = 20000;
-		uint64_t           done        = 0;
 		for (;;) {
+			uint64_t       done  = m_done.load(std::memory_order_acquire);
 			uint64_t       head  = m_head.load(std::memory_order_acquire);
 			const uint32_t spins = head == done && SpinGate::Open(false) ? UploadSpins : 0;
 			for (uint32_t spin = 0; head == done && spin < spins; ++spin) {
 				_mm_pause();
 				head = m_head.load(std::memory_order_acquire);
+				done = m_done.load(std::memory_order_acquire);
 			}
 			if (head == done) {
 				LiveCounters::Add(LiveCounters::UploadSleeps);
@@ -152,43 +208,55 @@ private:
 				m_sleeping.store(false, std::memory_order_relaxed);
 				continue;
 			}
-			const auto start = std::chrono::steady_clock::now();
-			const auto since = [](std::chrono::steady_clock::time_point from) {
-				return static_cast<uint64_t>((std::chrono::steady_clock::now() - from).count()) / 1000u;
-			};
-			const auto call = [](const Job& job) {
-				job.call(job.context, reinterpret_cast<uint64_t>(job.destination), job.size);
-			};
-			while (done < head) {
-				if (const Job& job = m_jobs[done % Capacity]; job.call != nullptr && !job.protection) {
-					const auto called = std::chrono::steady_clock::now();
-					call(job);
-					LiveCounters::Add(LiveCounters::UploadCallUs, since(called));
-					++done;
-					continue;
-				}
-				// The jobs up to the next other call (which keeps its place): their write protections first, in their
-				// order, then their copies, which are independent of each other. A copy follows the protection of its
-				// pages (pushed before it) either way: one pushed after the copy only re-arms its pages sooner, and the
-				// copy that is its own still comes after it. (Each upload pushes its protections then its copies: in
-				// queue order the copies came in runs of one upload's few, a few KiB to tens of KiB each.)
-				uint64_t end = done, bytes = 0;
-				for (; end < head; ++end) {
-					const Job& next = m_jobs[end % Capacity];
-					if (next.call == nullptr) bytes += next.size;
-					else if (!next.protection) break;
-				}
-				const auto protecting = std::chrono::steady_clock::now();
-				for (uint64_t i = done; i < end; ++i)
-					if (const Job& next = m_jobs[i % Capacity]; next.call != nullptr) call(next);
-				LiveCounters::Add(LiveCounters::UploadCallUs, since(protecting));
-				CopyRun(done, end, bytes);
-				done = end;
-			}
-			LiveCounters::Add(LiveCounters::UploadBusyUs, since(start));
-			m_done.store(done, std::memory_order_seq_cst);
-			if (m_waiters.load(std::memory_order_seq_cst) != 0) m_done.notify_all();
+			// (The render thread may be running jobs itself: Help.)
+			std::lock_guard process(m_process);
+			done = m_done.load(std::memory_order_relaxed);
+			head = m_head.load(std::memory_order_acquire);
+			if (done < head) Process(done, head, false);
 		}
+	}
+
+	// Jobs [done, head) in queue order (the caller holds m_process), m_done published as they finish; `helper`: stops at a
+	// call other than a write protection. Returns the jobs' new end.
+	uint64_t Process(uint64_t done, uint64_t head, bool helper) {
+		const auto start = std::chrono::steady_clock::now();
+		const auto since = [](std::chrono::steady_clock::time_point from) {
+			return static_cast<uint64_t>((std::chrono::steady_clock::now() - from).count()) / 1000u;
+		};
+		const auto call = [](const Job& job) {
+			job.call(job.context, reinterpret_cast<uint64_t>(job.destination), job.size);
+		};
+		while (done < head) {
+			if (const Job& job = m_jobs[done % Capacity]; job.call != nullptr && !job.protection) {
+				if (helper) break;
+				const auto called = std::chrono::steady_clock::now();
+				call(job);
+				LiveCounters::Add(LiveCounters::UploadCallUs, since(called));
+				++done;
+				continue;
+			}
+			// The jobs up to the next other call (which keeps its place): their write protections first, in their
+			// order, then their copies, which are independent of each other. A copy follows the protection of its
+			// pages (pushed before it) either way: one pushed after the copy only re-arms its pages sooner, and the
+			// copy that is its own still comes after it. (Each upload pushes its protections then its copies: in
+			// queue order the copies came in runs of one upload's few, a few KiB to tens of KiB each.)
+			uint64_t end = done, bytes = 0;
+			for (; end < head; ++end) {
+				const Job& next = m_jobs[end % Capacity];
+				if (next.call == nullptr) bytes += next.size;
+				else if (!next.protection) break;
+			}
+			const auto protecting = std::chrono::steady_clock::now();
+			for (uint64_t i = done; i < end; ++i)
+				if (const Job& next = m_jobs[i % Capacity]; next.call != nullptr) call(next);
+			LiveCounters::Add(LiveCounters::UploadCallUs, since(protecting));
+			CopyRun(done, end, bytes);
+			done = end;
+		}
+		if (!helper) LiveCounters::Add(LiveCounters::UploadBusyUs, since(start));
+		m_done.store(done, std::memory_order_seq_cst);
+		if (m_waiters.load(std::memory_order_seq_cst) != 0) m_done.notify_all();
+		return done;
 	}
 
 	// The copies among jobs [first, last) (calls skipped), `bytes` in all. Copies of 1 MiB or more together are
@@ -262,6 +330,7 @@ private:
 	alignas(64) std::atomic<bool>      m_sleeping {false};
 	std::atomic<uint32_t>              m_waiters {0};
 	std::atomic<bool>                  m_stop {false};
+	std::mutex                         m_process; // held by whichever thread runs jobs (the worker, or Help)
 	std::thread                        m_thread;
 };
 
@@ -289,9 +358,16 @@ inline void Wait(uint64_t sequence) {
 	if (sequence != 0) Get().Wait(sequence);
 }
 
-// Render thread: every recorded copy reaches staging memory before this returns.
+// Render thread: every recorded copy reaches staging memory before this returns; the jobs the worker is not at made
+// here where kyty_local_upload_help says (above).
 inline void Drain() {
-	Wait(SubmitSequence());
+	if (const auto sequence = SubmitSequence(); sequence != 0) {
+		const auto help = kyty_local_upload_help.load(std::memory_order_relaxed);
+		if (help == 1 || (help == 2 && !SpinGate::g_open.load(std::memory_order_relaxed)))
+			Get().Help(sequence);
+		else
+			Get().Wait(sequence);
+	}
 }
 
 // Render thread: every recorded job on guest [vaddr, vaddr + size) is done before this returns.

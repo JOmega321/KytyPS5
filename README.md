@@ -21,6 +21,10 @@
 > `_SaveData\PPSA01341\SAVEDATA0OptionsProfile0` away so the game asks again. Steps:
 > [Game language](docs/PORTABLE-README.md#game-language-chinese-japanese-korean-and-others).
 >
+> **Steam Deck:** about 26-30 fps in the worlds and 40 in the Nexus with the Deck's settings, from the release's Steam
+> Deck package (`KytyPS5-steamdeck-<version>.zip`). How to copy the emulator and the game over and start it from Steam:
+> [docs/STEAM-DECK.md](docs/STEAM-DECK.md).
+>
 > 中文：本分支专为《恶魔之魂》(PS5 版 PPSA01341) 优化，支持游戏版本 1.07 (01.007.000) 和 1.05 (01.005.000)，两者性能补丁相同
 > （着色器缓存按版本分别预编译）；其他版本和游戏未测试。
 > 下载[最新 release](https://github.com/chenxiao07/KytyPS5/releases/latest)，解压后双击 `launcher.cmd`
@@ -32,6 +36,8 @@
 > 英文、韩文、泰文；`3` 为日版）。已有存档时，先备份 `_SaveData`，再把 `_SaveData\PPSA01341\SAVEDATA0OptionsProfile0`
 > 移出存档目录（角色存档不受影响，只有游戏设置恢复默认），下次启动会出现语言选择。详见
 > [Game language](docs/PORTABLE-README.md#game-language-chinese-japanese-korean-and-others)。
+> **Steam Deck：** 用发布页的 Steam Deck 版的包（`KytyPS5-steamdeck-<版本>.zip`），按 Deck 的设置，各世界约 26–30 帧，
+> 连结之地约 40 帧。怎样把模拟器和游戏传到 Deck、从 Steam 启动：[docs/STEAM-DECK.zh-CN.md](docs/STEAM-DECK.zh-CN.md)。
 
 ## Fixes worth cherry-picking
 

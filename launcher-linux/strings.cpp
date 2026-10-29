@@ -44,7 +44,7 @@ const Table& English() {
 	    {"nav.advanced", "Advanced"},
 	    {"nav.experimental", "Experimental"},
 	    {"nav.hint",
-	     "In the game: F8 switches the performance overlay, F9 saves a debug snapshot."},
+	     "In the game: F8 switches the performance overlay."},
 
 	    {"play.choose", "Choose your game"},
 	    {"play.checks", "Checks"},
@@ -99,6 +99,7 @@ const Table& English() {
 	    {"summary.fps120", "up to 120 fps"},
 	    {"summary.options", "Options"},
 	    {"summary.presentDirect", "direct presentation"},
+	    {"summary.vrrFlips", "VRR flips"},
 	    {"summary.antilag", "Anti-Lag"},
 	    {"summary.fps30", "30 fps lock"},
 	    {"summary.extra", "extra options"},
@@ -188,14 +189,15 @@ const Table& English() {
 	                       "is the newer, sharper "
 	                       "model; CNN the older one, lighter on RTX 20 and 30 cards, where the "
 	                       "transformer model costs more."},
-	    {"dlsssharp", "DLSS sharpening"},
-	    {"dlsssharp.off", "Off"},
-	    {"dlsssharp.low", "Low"},
-	    {"dlsssharp.medium", "Medium"},
-	    {"dlsssharp.high", "High"},
-	    {"dlsssharp.desc", "With DLSS: sharpens its picture (RCAS, as FSR 3 does). The game's own TAA "
-	                       "sharpens its image; DLSS doesn't, so fine detail looks softer. Higher "
-	                       "levels can show halos on edges."},
+	    {"sharpen", "Sharpening"},
+	    {"sharpen.off", "Off"},
+	    {"sharpen.low", "Low"},
+	    {"sharpen.medium", "Medium"},
+	    {"sharpen.high", "High"},
+	    {"sharpen.desc", "With DLSS or FSR 3: sharpens the upscaler's picture (RCAS). DLSS is Off by "
+	                     "default: the game's own TAA sharpens its image, DLSS doesn't, so fine detail "
+	                     "looks softer. FSR 3 is Medium by default, its own sharpening. Each upscaler "
+	                     "keeps its own setting. Higher levels can show halos on edges."},
 	    {"dlss.dlaa", "DLAA"},
 	    {"dlss.quality", "Quality"},
 	    {"dlss.balanced", "Balanced"},
@@ -209,8 +211,8 @@ const Table& English() {
 	                     "leave out their largest "
 	                     "level). Low: shorter sun shadows, simpler distant detail, textures half "
 	                     "the size per side. Lowest: "
-	                     "shorter still, no ambient or torch shadows, textures a quarter the size. "
-	                     "For PCs whose processor "
+	                     "shorter still, no ambient or torch shadows, no decals (blood, scorch marks), "
+	                     "textures a quarter the size. For PCs whose processor "
 	                     "or graphics card limits the frame rate."},
 	    {"framegen", "DLSS frame generation"},
 	    {"framegen.off", "Off"},
@@ -229,7 +231,7 @@ const Table& English() {
 	    {"dlssruntime.found", "found in {0}"},
 	    {"dlssruntime.none", "not built yet"},
 	    {"dlssruntime.noScript", "get-dlss-linux.sh is not next to the launcher"},
-	    {"fsr", "AMD FSR 3 frame generation (2x, any graphics card; instead of DLSS)"},
+	    {"fsr", "AMD FSR 3 frame generation (2x, any graphics card; instead of DLSS frame generation)"},
 	    {"fsr.desc", "One generated frame between two of the game's, from its depth and motion. "
 	                 "With VSync the shown "
 	                 "frames are capped at the display's refresh."},
@@ -341,6 +343,11 @@ const Table& English() {
 	     "swing between 30 and 60; with 2x frame generation it shows 60. Movies and menus stay at "
 	     "60. "
 	     "Smoothest on 60 Hz and 120 Hz displays or with VRR. Replaces \"Up to 120 fps\"."},
+	    {"vrrflips", "Flip frames when ready (VRR displays)"},
+	    {"vrrflips.desc",
+	     "For a display with G-SYNC, FreeSync or VRR on: each frame goes to the screen as soon as it is "
+	     "done instead of on the game's 60 Hz beat, so below 60 fps the motion stays even. A "
+	     "display without VRR shows each frame at its next refresh, as before."},
 	    {"presentdirect", "Direct presentation (VRR displays)"},
 	    {"presentdirect.desc",
 	     "Each frame goes to the display as soon as it is ready, instead of through the presenter "
@@ -400,7 +407,7 @@ const Table& Chinese() {
 	    {"nav.shaders", "着色器"},
 	    {"nav.advanced", "高级"},
 	    {"nav.experimental", "实验性"},
-	    {"nav.hint", "游戏中：F8 切换性能面板，F9 保存调试快照。"},
+	    {"nav.hint", "游戏中：F8 切换性能面板。"},
 
 	    {"play.choose", "选择游戏"},
 	    {"play.checks", "检查"},
@@ -452,6 +459,7 @@ const Table& Chinese() {
 	    {"summary.fps120", "最高 120 帧"},
 	    {"summary.options", "选项"},
 	    {"summary.presentDirect", "直接呈现"},
+	    {"summary.vrrFlips", "VRR 即时翻转"},
 	    {"summary.antilag", "Anti-Lag"},
 	    {"summary.fps30", "锁定 30 帧"},
 	    {"summary.extra", "附加参数"},
@@ -525,13 +533,14 @@ const Table& Chinese() {
 	    {"dlssmodel.desc", "使用 DLSS 时生效。自动：由 DLSS "
 	                       "版本决定模型。Transformer：更新、更清晰的模型；CNN：旧模型，在 RTX 20 "
 	                       "和 30 系显卡上更轻（Transformer 模型在这些显卡上开销更大）。"},
-	    {"dlsssharp", "DLSS 锐化"},
-	    {"dlsssharp.off", "关闭"},
-	    {"dlsssharp.low", "低"},
-	    {"dlsssharp.medium", "中"},
-	    {"dlsssharp.high", "高"},
-	    {"dlsssharp.desc", "使用 DLSS 时生效：锐化 DLSS 的画面（RCAS，与 FSR 3 相同）。游戏自带的 "
-	                       "TAA 会锐化画面，DLSS 不会，所以细节看起来偏软。等级越高，边缘越可能出现光晕。"},
+	    {"sharpen", "锐化"},
+	    {"sharpen.off", "关闭"},
+	    {"sharpen.low", "低"},
+	    {"sharpen.medium", "中"},
+	    {"sharpen.high", "高"},
+	    {"sharpen.desc", "使用 DLSS 或 FSR 3 时生效：锐化超分后的画面（RCAS）。DLSS 默认关闭：游戏自带的 TAA "
+	                     "会锐化画面，DLSS 不会，所以细节看起来偏软。FSR 3 默认为「中」，即它自带的锐化。"
+	                     "两种超分各自保存设置。等级越高，边缘越可能出现光晕。"},
 	    {"dlss.dlaa", "DLAA"},
 	    {"dlss.quality", "质量"},
 	    {"dlss.balanced", "平衡"},
@@ -544,7 +553,7 @@ const Table& Chinese() {
 	    {"quality.desc",
 	     "标准：PS5 的画面（显存低于 12 GB "
 	     "时大贴图会去掉最大一级）。低：日光阴影更短，远景细节更简单，贴图边长减半。最低：阴影更短"
-	     "，无环境光遮蔽与火把阴影，贴图为四分之一。适合 CPU 或显卡限制帧率的电脑。"},
+	     "，无环境光遮蔽与火把阴影，无贴花（血迹、焦痕），贴图为四分之一。适合 CPU 或显卡限制帧率的电脑。"},
 	    {"framegen", "DLSS 帧生成"},
 	    {"framegen.off", "关闭"},
 	    {"framegen.ok",
@@ -560,7 +569,7 @@ const Table& Chinese() {
 	    {"dlssruntime.found", "位于 {0}"},
 	    {"dlssruntime.none", "尚未构建"},
 	    {"dlssruntime.noScript", "启动器所在文件夹中没有 get-dlss-linux.sh"},
-	    {"fsr", "AMD FSR 3 帧生成（2 倍，任意显卡；替代 DLSS）"},
+	    {"fsr", "AMD FSR 3 帧生成（2 倍，任意显卡；替代 DLSS 帧生成）"},
 	    {"fsr.desc",
 	     "根据游戏的深度与运动，在两帧之间生成一帧。开启垂直同步时显示帧数不超过显示器刷新率。"},
 
@@ -648,6 +657,10 @@ const Table& Chinese() {
 	     "帧：处理器和显卡的工作量减半，帧间隔均匀，游戏速度不变。适合帧率在 30 到 60 "
 	     "之间来回跳的电脑；配合 2 倍插帧显示 60 帧。过场动画和菜单仍为 60 帧。在 60 Hz、120 Hz "
 	     "显示器上或开启 VRR 时最平稳。打开后「最高 120 帧」不再生效。"},
+	    {"vrrflips", "画面完成即翻转（VRR 显示器）"},
+	    {"vrrflips.desc",
+	     "适用于开启了 G-SYNC、FreeSync 或 VRR 的显示器：每一帧完成后立即送去显示，而不是按游戏 60 Hz 的节拍，帧数低于 60 时画面运动依然均匀。"
+	     "不支持 VRR 的显示器仍在下一次刷新时显示每一帧，和以前一样。"},
 	    {"presentdirect", "直接呈现（VRR 显示器）"},
 	    {"presentdirect.desc",
 	     "每一帧准备好后立即送到显示器，不经过为保证垂直同步平稳而设的呈现线程。在某些显示器上，只"
@@ -715,7 +728,7 @@ const Table& Portuguese() {
 	    {"nav.advanced", "Avançado"},
 	    {"nav.experimental", "Experimental"},
 	    {"nav.hint",
-	     "No jogo: F8 alterna o painel de desempenho, F9 salva um snapshot de depuração."},
+	     "No jogo: F8 alterna o painel de desempenho."},
 
 	    {"play.choose", "Escolha o seu jogo"},
 	    {"play.checks", "Verificações"},
@@ -770,6 +783,7 @@ const Table& Portuguese() {
 	    {"summary.fps120", "até 120 fps"},
 	    {"summary.options", "Opções"},
 	    {"summary.presentDirect", "apresentação direta"},
+	    {"summary.vrrFlips", "trocas VRR"},
 	    {"summary.antilag", "Anti-Lag"},
 	    {"summary.fps30", "trava em 30 fps"},
 	    {"summary.extra", "opções extras"},
@@ -860,15 +874,16 @@ const Table& Portuguese() {
 	     "Com DLSS: Automático deixa o modelo para a versão do DLSS. Transformer é o modelo mais "
 	     "novo e "
 	     "nítido; CNN o antigo, mais leve nas RTX 20 e 30, onde o transformer custa mais."},
-	    {"dlsssharp", "Nitidez do DLSS"},
-	    {"dlsssharp.off", "Desligada"},
-	    {"dlsssharp.low", "Baixa"},
-	    {"dlsssharp.medium", "Média"},
-	    {"dlsssharp.high", "Alta"},
-	    {"dlsssharp.desc",
-	     "Com DLSS: aumenta a nitidez da imagem (RCAS, como o FSR 3 faz). O TAA do próprio jogo "
-	     "aumenta a nitidez da imagem; o DLSS não, então os detalhes finos parecem mais suaves. "
-	     "Níveis mais altos podem mostrar halos nas bordas."},
+	    {"sharpen", "Nitidez"},
+	    {"sharpen.off", "Desligada"},
+	    {"sharpen.low", "Baixa"},
+	    {"sharpen.medium", "Média"},
+	    {"sharpen.high", "Alta"},
+	    {"sharpen.desc",
+	     "Com DLSS ou FSR 3: aumenta a nitidez da imagem do upscaler (RCAS). No DLSS vem desligada: o "
+	     "TAA do próprio jogo aumenta a nitidez da imagem, o DLSS não, então os detalhes finos parecem "
+	     "mais suaves. No FSR 3 vem em Média, a nitidez dele mesmo. Cada upscaler guarda a sua. Níveis "
+	     "mais altos podem mostrar halos nas bordas."},
 	    {"dlss.dlaa", "DLAA"},
 	    {"dlss.quality", "Qualidade"},
 	    {"dlss.balanced", "Equilibrado"},
@@ -883,7 +898,7 @@ const Table& Portuguese() {
 	                     "maior nível). Baixa: sombras do sol mais curtas, detalhe distante mais "
 	                     "simples, texturas com metade "
 	                     "do tamanho por lado. Mínima: ainda mais curtas, sem sombras ambientes "
-	                     "nem de tochas, texturas com um "
+	                     "nem de tochas, sem decalques (sangue, marcas de queimado), texturas com um "
 	                     "quarto do tamanho. Para PCs cujo processador ou placa de vídeo limita a "
 	                     "taxa de quadros."},
 	    {"framegen", "Geração de quadros DLSS"},
@@ -905,7 +920,7 @@ const Table& Portuguese() {
 	    {"dlssruntime.found", "encontrado em {0}"},
 	    {"dlssruntime.none", "ainda não compilado"},
 	    {"dlssruntime.noScript", "o get-dlss-linux.sh não está ao lado do launcher"},
-	    {"fsr", "Geração de quadros AMD FSR 3 (2x, qualquer placa de vídeo; no lugar do DLSS)"},
+	    {"fsr", "Geração de quadros AMD FSR 3 (2x, qualquer placa de vídeo; no lugar da geração de quadros DLSS)"},
 	    {"fsr.desc", "Um quadro gerado entre dois do jogo, a partir da profundidade e do "
 	                 "movimento. Com VSync os quadros "
 	                 "mostrados ficam limitados à taxa da tela."},
@@ -1016,6 +1031,11 @@ const Table& Portuguese() {
 	                   "que oscilam entre 30 e 60; com geração de quadros 2x mostra 60. Vídeos e "
 	                   "menus ficam em 60. Mais "
 	                   "suave em telas de 60 Hz e 120 Hz ou com VRR. Substitui \"Até 120 fps\"."},
+	    {"vrrflips", "Quadros trocados quando prontos (telas VRR)"},
+	    {"vrrflips.desc",
+	     "Para telas com G-SYNC, FreeSync ou VRR ligado: cada quadro vai para a tela assim que fica "
+	     "pronto, em vez de no ritmo de 60 Hz do jogo, e abaixo de 60 fps o movimento fica regular. "
+	     "Uma tela sem VRR mostra cada quadro na próxima atualização, como antes."},
 	    {"presentdirect", "Apresentação direta (telas VRR)"},
 	    {"presentdirect.desc",
 	     "Cada quadro vai para a tela assim que fica pronto, em vez de passar pela thread de "

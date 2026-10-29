@@ -287,12 +287,14 @@ if ($Aspect -and $Aspect -ne '16:9') { $environment['KYTY_RENDER_ASPECT'] = $Asp
 # -Quality low|lowest: Demon's Souls engine settings that cut what a frame draws, for PCs whose CPU limits the frame
 # rate (each draw costs the emulator CPU time). low: levels of detail chosen as for a 720-line picture (1080), sun
 # shadows to 125 m (250); lowest: detail as for 480 lines, sun shadows to 60 m, no ambient shadowing, no shadows from
-# torches and other spot lights. A laptop Ryzen 9 5900HX + RTX 3080 standing at the Gates of Boletaria, at 1440:
-# standard 21.9 fps, lowest 25.6. Not r_forceShadowLOD (until 10-17 in both): it draws objects with their shadow
-# meshes, and objects without one vanish (carts and barricades at the Gates of Boletaria; issue #40), for 6% more.
+# torches and other spot lights, no projected decals (blood, scorch marks: 10-28, RTX 5090 at 1-1 on lowest, standing
+# 86.1 -> 96.1 fps, walking 89.2 -> 95.6, the GPU's frame -22%; on a Steam Deck +7% at 360p). A laptop Ryzen 9 5900HX
+# + RTX 3080 standing at the Gates of Boletaria, at 1440: standard 21.9 fps, lowest 25.6 (before the decals). Not
+# r_forceShadowLOD (until 10-17 in both): it draws objects with their shadow meshes, and objects without one vanish
+# (carts and barricades at the Gates of Boletaria; issue #40), for 6% more.
 $qualityConvars = @{
 	low    = 'r_forceViewportHeightForPixelSizeCalc=720;sunShadowMaxDistance=125'
-	lowest = 'r_forceViewportHeightForPixelSizeCalc=480;sunShadowMaxDistance=60;r_enableAmbientShadowing=false;r_enableSpotShadows=false'
+	lowest = 'r_forceViewportHeightForPixelSizeCalc=480;sunShadowMaxDistance=60;r_enableAmbientShadowing=false;r_enableSpotShadows=false;r_projectedDecalEnable=false'
 }
 if ($Quality -and $Quality -ne 'standard') {
 	if (!$qualityConvars.Contains($Quality)) { throw "-Quality takes low or lowest (or standard), not '$Quality'" }
@@ -557,8 +559,6 @@ if ($shaders -and !$inputsReady) {
 foreach ($entry in $environment.GetEnumerator()) { Set-Item "env:$($entry.Key)" $entry.Value }
 New-Item -ItemType Directory -Force $logDir | Out-Null
 $out = "$logDir\$stamp.out.log"
-# (Named to the emulator too: F9's debug snapshot, src/local/debug-snapshot.h, notes the run's log.)
-$env:KYTY_RUN_LOG = $out
 $process = Start-Process -FilePath $Exe -ArgumentList $quoted -WorkingDirectory $PSScriptRoot -PassThru `
 	-RedirectStandardOutput $out -RedirectStandardError "$logDir\$stamp.err.log"
 if ($mask -ne $all) { $process.ProcessorAffinity = [IntPtr]$mask }

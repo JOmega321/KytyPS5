@@ -1343,7 +1343,8 @@ bool PipelineCache::MergeBinaryShards(GraphicContext& graphics, bool prune, bool
 	}
 	auto temporary = path;
 	temporary += ".tmp";
-	const bool saved = writer.Save(temporary, signature);
+	PipelineBinaryWriter::SaveReport report;
+	const bool                       saved = writer.Save(temporary, signature, &report);
 	sources.clear(); // closes the files: the store may be replaced
 	if (saved) RenameReplacing(temporary, path, error);
 	const bool merged = saved && !error;
@@ -1351,7 +1352,11 @@ bool PipelineCache::MergeBinaryShards(GraphicContext& graphics, bool prune, bool
 		for (const auto& file: files) std::filesystem::remove(file, error);
 	}
 	PipelineCacheLog("Static pipeline binaries: merged {} shards{}, {} pipelines{}", files.size(),
-	                 prune ? " (pruned)" : "", writer.Pipelines(), merged ? "" : ": FAILED");
+	                 prune ? " (pruned)" : "", writer.Pipelines() - report.dropped_pipelines, merged ? "" : ": FAILED");
+	if (report.unreadable_binaries != 0)
+		PipelineCacheLog("Static pipeline binaries: {} binaries could not be read back from their shards' files (damaged on "
+		                 "the disk): their {} pipelines left out, made when first needed",
+		                 report.unreadable_binaries, report.dropped_pipelines);
 	if (!merged) {
 		// Why (issue #225: every shard done, then this): the new store not written (a drive without room for it, or a
 		// FAT32 one, which holds no file of 4 GiB: the store is ~5.5 GiB), or not put in place (the store open in a
@@ -1360,7 +1365,7 @@ bool PipelineCache::MergeBinaryShards(GraphicContext& graphics, bool prune, bool
 		const auto      space  = std::filesystem::space(path.parent_path(), space_error);
 		const auto      system = LocalPlatform::FileSystemName(Common::PathToString(path.parent_path()));
 		const auto      what   = saved ? "the new store could not replace the old one: " + error.message()
-		                               : std::string("the new store could not be written");
+		                               : "the new store could not be written: " + report.failure;
 		const auto      fat    = system == "FAT32" || system == "FAT"
 		                             ? ", a " + system + " drive, which holds no file of 4 GiB or more: move the emulator's "
 		                                                 "folder to an NTFS or exFAT drive"

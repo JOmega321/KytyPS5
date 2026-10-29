@@ -69,14 +69,27 @@ constexpr uint32_t TranslatorFeatureNativeFloatMinMax = 4u;
 // Vector register writes under EXEC as their values where no use observes the lanes outside it (IR::EliminateExecSelects:
 // RTX 5090 at 1-1, 4K: GPU -3%; the heaviest compute shaders 4-14% fewer instructions).
 constexpr uint32_t TranslatorFeatureExecSelects = 8u;
+// Address loads from one base in a block share the first one's page walk where they stay in its page (LoadBda). Measured
+// on the Steam Deck only: in the Steam Deck build's default set; elsewhere KYTY_BDA_GROUP_WALKS=1.
+constexpr uint32_t TranslatorFeatureBdaGroupWalks = 16u;
+// Pixel shaders' DPP quad_perm moves read by quad operations, defined on helper pixels where a shuffle is not (the
+// derivatives at triangle edges: the debug menu font's lines, PR #243); with the GPU's quad operations only.
+constexpr uint32_t TranslatorFeaturePixelQuadReads = 32u;
 constexpr uint32_t TranslatorFeatures = TranslatorFeatureCooperativeHalves | TranslatorFeatureTableSlotsAtUse |
-                                        TranslatorFeatureNativeFloatMinMax | TranslatorFeatureExecSelects;
+                                        TranslatorFeatureNativeFloatMinMax | TranslatorFeatureExecSelects |
+                                        TranslatorFeaturePixelQuadReads
+#if defined(KYTY_STEAM_DECK)
+                                        | TranslatorFeatureBdaGroupWalks
+#endif
+    ;
 // Those a store made without stays up to date for (no precompile offered for them alone): the next precompile, made
 // for another reason (a new graphics driver, new seeds), brings them; worth less than a precompile's time.
-constexpr uint32_t TranslatorFeaturesWithNextPrecompile = TranslatorFeatureExecSelects;
+constexpr uint32_t TranslatorFeaturesWithNextPrecompile =
+    TranslatorFeatureExecSelects | TranslatorFeatureBdaGroupWalks | TranslatorFeaturePixelQuadReads;
 // Those the translation uses (default: all; the emulator sets those its static store was made with before it translates
 // anything). KYTY_LANE_LOCAL_COOP=0/1 overrides the cooperative halves either way, KYTY_TABLE_SLOTS_AT_USE=0/1 the
-// table slots' loads, KYTY_NATIVE_FLOAT_MIN_MAX=0/1 the float min/max, KYTY_EXEC_SELECTS=0/1 the EXEC selects.
+// table slots' loads, KYTY_NATIVE_FLOAT_MIN_MAX=0/1 the float min/max, KYTY_EXEC_SELECTS=0/1 the EXEC selects,
+// KYTY_BDA_GROUP_WALKS=0/1 the shared page walks, KYTY_PIXEL_QUAD_READS=0/1 the pixel shaders' quad reads.
 void                   SetTranslatorFeatures(uint32_t features);
 [[nodiscard]] uint32_t TranslatorFeatureSet();
 // Those this GPU's translation may use (default: all) and those it uses whatever the store was made with (`required`,

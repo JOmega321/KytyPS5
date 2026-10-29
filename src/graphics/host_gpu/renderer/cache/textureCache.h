@@ -296,6 +296,8 @@ private:
 	// A whole upload of a large image a piece of guest memory at a time; false: not such an image (ObtainBufferForImage's).
 	// `only`: the subresources over those [begin, end) ranges alone, of an image of any size.
 	[[nodiscard]] bool UploadImageChunked(Image& image, const std::vector<std::pair<uint64_t, uint64_t>>* only = nullptr);
+	// The size from which images upload in pieces (UploadImageChunked): 256 MiB, or half the staging ring where less.
+	[[nodiscard]] uint64_t ChunkedUploadMin() const;
 	[[nodiscard]] bool UploadImageSubresources(Image& image, const std::vector<std::pair<uint64_t, uint64_t>>& ranges);
 	// The dirty layers in [first_layer, last_layer) only.
 	[[nodiscard]] bool UploadDepthPartial(Image& image, uint32_t first_layer = 0,

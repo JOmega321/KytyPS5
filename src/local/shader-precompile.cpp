@@ -68,11 +68,83 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <string_view>
 #include <thread>
 
 using Libs::Graphics::PipelineCache;
+
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+
+// A crash of this program said in its log (its standard output, written past the C runtime's buffer and locks): the
+// exception, the faulting instruction and the faulting thread's frames, each as module+offset. Issue #225: a precompile's
+// process ended with an access violation in ntdll.dll and nothing in its log (the emulator's own report comes with the
+// game's loader, which this program does not run). Windows' error reporting goes on after it.
+static void CrashWrite(const char* text) {
+	DWORD written = 0;
+	(void)WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), text, static_cast<DWORD>(std::strlen(text)), &written, nullptr);
+}
+
+static void CrashWriteAddress(const char* label, uint64_t address) {
+	char    line[600];
+	HMODULE module = nullptr;
+	char    path[MAX_PATH] {};
+	if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+	                       reinterpret_cast<LPCSTR>(address), &module) &&
+	    GetModuleFileNameA(module, path, sizeof(path)) != 0) {
+		const char* name = std::strrchr(path, '\\');
+		std::snprintf(line, sizeof(line), "%s%s+0x%llx\n", label, name != nullptr ? name + 1 : path,
+		              static_cast<unsigned long long>(address - reinterpret_cast<uint64_t>(module)));
+	} else {
+		std::snprintf(line, sizeof(line), "%s0x%016llx\n", label, static_cast<unsigned long long>(address));
+	}
+	CrashWrite(line);
+}
+
+static LONG WINAPI ReportCrash(EXCEPTION_POINTERS* pointers) {
+	static volatile LONG reported = 0;
+	if (InterlockedExchange(&reported, 1) != 0) return EXCEPTION_CONTINUE_SEARCH;
+	const auto& record = *pointers->ExceptionRecord;
+	char        line[256];
+	std::snprintf(line, sizeof(line), "--- Precompile crash ---\nexception 0x%08lx on thread %lu", record.ExceptionCode,
+	              GetCurrentThreadId());
+	CrashWrite(line);
+	if (record.ExceptionCode == EXCEPTION_ACCESS_VIOLATION && record.NumberParameters >= 2) {
+		std::snprintf(line, sizeof(line), ", %s 0x%016llx",
+		              record.ExceptionInformation[0] == 0   ? "reading"
+		              : record.ExceptionInformation[0] == 8 ? "executing"
+		                                                    : "writing",
+		              static_cast<unsigned long long>(record.ExceptionInformation[1]));
+		CrashWrite(line);
+	}
+	CrashWrite("\n");
+	CrashWriteAddress("at ", reinterpret_cast<uint64_t>(record.ExceptionAddress));
+	// The frames from the faulting context, unwound by the modules' unwind data (a leaf function's return address is at
+	// the stack pointer), within this thread's stack.
+	ULONG_PTR low = 0, high = 0;
+	GetCurrentThreadStackLimits(&low, &high);
+	CONTEXT context = *pointers->ContextRecord;
+	for (int frame = 0; frame < 48 && context.Rip != 0 && context.Rsp >= low && context.Rsp < high; ++frame) {
+		CrashWriteAddress("  ", context.Rip);
+		DWORD64 image_base = 0;
+		if (const auto* function = RtlLookupFunctionEntry(context.Rip, &image_base, nullptr); function != nullptr) {
+			void*   handler_data = nullptr;
+			DWORD64 establisher  = 0;
+			RtlVirtualUnwind(UNW_FLAG_NHANDLER, image_base, context.Rip, const_cast<PRUNTIME_FUNCTION>(function), &context,
+			                 &handler_data, &establisher, nullptr);
+		} else {
+			context.Rip = *reinterpret_cast<const DWORD64*>(context.Rsp);
+			context.Rsp += 8;
+		}
+	}
+	return EXCEPTION_CONTINUE_SEARCH;
+}
+#endif
 
 static int Usage() {
 	std::fprintf(stderr, "usage: kyty_shader_precompile --game <dir> --seeds <file> [--shard <i>/<n>] "
@@ -91,6 +163,14 @@ static int Usage() {
 }
 
 int main(int argc, char* argv[]) {
+#if defined(_WIN32)
+	SetUnhandledExceptionFilter(ReportCrash);
+	// KYTY_TEST_PRECOMPILE_CRASH=1 (a test of that report): an access violation at once.
+	if (const char* test = std::getenv("KYTY_TEST_PRECOMPILE_CRASH"); test != nullptr && test[0] == '1') {
+		volatile int* volatile nowhere = nullptr;
+		*nowhere                       = 1;
+	}
+#endif
 	std::filesystem::path          game;
 	bool                           merge  = false;
 	bool                           prune  = false;

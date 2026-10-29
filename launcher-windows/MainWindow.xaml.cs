@@ -64,8 +64,10 @@ partial class MainWindow : Window {
 	int pageIndex;
 
 	TextBox gamePath, extraArgs;
-	ComboBox resolution, ratio, render, upscaler, dlssModel, dlssSharpness, output, quality, frameGen, language, audioOutput, hud, uiLanguage, gpu;
-	CheckBox fullscreen, aspect, hdr, fps120, vsync, lowLatency, fsr, cheats, redzone, safeGpu, ecores, presentDirect, antiLag,
+	ComboBox resolution, ratio, render, upscaler, dlssModel, sharpness, output, quality, frameGen, language, audioOutput, hud, uiLanguage, gpu;
+	// The Sharpening row's value for each upscaler ("0" to "0.9"), and the upscaler whose value it shows.
+	string dlssSharpness = "0", fsrSharpness = "0.6", sharpnessShown = "";
+	CheckBox fullscreen, aspect, hdr, fps120, vsync, lowLatency, fsr, cheats, redzone, safeGpu, ecores, presentDirect, vrrFlips, antiLag,
 		keepResident, fps30, padSpeaker, reopenLauncher;
 	TextBlock renderNote, outputNote, upscalerNote, frameGenNote, streamlineText, cheatState, bannerTitle, bannerLine, storeLine;
 	Image banner;
@@ -542,11 +544,23 @@ partial class MainWindow : Window {
 		var models = new[] { new Choice(T("dlssmodel.auto"), ""), new Choice(T("dlssmodel.k"), "K"), new Choice(T("dlssmodel.e"), "E") };
 		dlssModel = Combo(models, Math.Max(0, Array.FindIndex(models, c => (string)c.Value == S.Str("dlss_preset"))));
 		dlssModel.IsEnabled = Value(upscaler) as string == "dlss";
-		// DLSS's sharpening (KYTY_DLSS_SHARPNESS): none by default; the game's own TAA sharpens, DLSS does not (issue #224).
-		var sharpnesses = new[] { new Choice(T("dlsssharp.off"), ""), new Choice(T("dlsssharp.low"), "0.3"),
-			new Choice(T("dlsssharp.medium"), "0.6"), new Choice(T("dlsssharp.high"), "0.9") };
-		dlssSharpness = Combo(sharpnesses, Math.Max(0, Array.FindIndex(sharpnesses, c => (string)c.Value == S.Str("dlss_sharpness"))));
-		dlssSharpness.IsEnabled = Value(upscaler) as string == "dlss";
+		// The upscaler's sharpening (KYTY_DLSS_SHARPNESS, KYTY_FSR_SHARPNESS): one row for the chosen upscaler, each with a
+		// value of its own: DLSS none by default (the game's own TAA sharpens, DLSS does not: issue #224), FSR 3 its 0.6
+		// (issue #227).
+		var sharpnesses = new[] { new Choice(T("sharpen.off"), "0"), new Choice(T("sharpen.low"), "0.3"),
+			new Choice(T("sharpen.medium"), "0.6"), new Choice(T("sharpen.high"), "0.9") };
+		Func<string, string, string> sharpnessOr = (value, fallback) => Array.Exists(sharpnesses, c => (string)c.Value == value) ? value : fallback;
+		dlssSharpness = sharpnessOr(S.Str("dlss_sharpness"), "0");
+		fsrSharpness  = sharpnessOr(S.Str("fsr_sharpness"), "0.6");
+		sharpness     = Combo(sharpnesses, 0);
+		Action showSharpness = () => {
+			KeepSharpness();
+			sharpnessShown = Value(upscaler) as string ?? "";
+			var shown = sharpnessShown == "fsr" ? fsrSharpness : dlssSharpness;
+			sharpness.SelectedIndex = Math.Max(0, Array.FindIndex(sharpnesses, c => (string)c.Value == shown));
+			sharpness.IsEnabled = sharpnessShown == "dlss" || sharpnessShown == "fsr";
+		};
+		showSharpness();
 		upscaler.SelectionChanged += (s, e) => {
 			if (building) return;
 			// The height chosen goes back to the upscaler it was for; the newly chosen one's is shown.
@@ -554,7 +568,7 @@ partial class MainWindow : Window {
 			renderForDlss = Value(upscaler) as string == "dlss" || Value(upscaler) as string == "fsr";
 			renderWanted = renderForDlss ? S.Int("render_dlss") : S.Int("render");
 			dlssModel.IsEnabled = Value(upscaler) as string == "dlss";
-			dlssSharpness.IsEnabled = Value(upscaler) as string == "dlss";
+			showSharpness();
 			UpdateUpscalerNote();
 			SelectRenderHeight();
 			UpdateRenderNote();
@@ -590,7 +604,7 @@ partial class MainWindow : Window {
 			Row("render", render, renderNote),
 			Row("output", output, outputNote),
 			Row("dlssmodel", dlssModel, Desc(T("dlssmodel.desc"))),
-			Row("dlsssharp", dlssSharpness, Desc(T("dlsssharp.desc"))),
+			Row("sharpen", sharpness, Desc(T("sharpen.desc"))),
 			Section("graphics.detail"),
 			Row("quality", quality, Desc(T("quality.desc"))),
 			Section("graphics.fg"),
@@ -727,7 +741,7 @@ partial class MainWindow : Window {
 
 	void UpdateUpscalerNote() {
 		var chosen = upscaler == null ? S.Str("upscaler") : Value(upscaler) as string;
-		// (DLSS with FSR 3 frame generation: that runs without Streamline, so the emulator upscales with FSR 3 instead.)
+		// (DLSS with FSR 3 frame generation: DLSS upscales through Streamline, AMD's runtime generates past it.)
 		var fsrFrameGen = fsr != null ? fsr.IsChecked == true : context.FsrAvailable && S.Bool("fsr");
 		upscalerNote.Text = chosen == "fsr" ? T("upscaler.fsrNote")
 		                    : chosen == "off" ? T("upscaler.offNote")
@@ -880,6 +894,7 @@ partial class MainWindow : Window {
 	// Options still being tried out (not defaults yet): a player turns one on, and its issue collects how it went.
 	FrameworkElement BuildExperimentalPage() {
 		presentDirect = Switch(S.Bool("present_direct"));
+		vrrFlips = Switch(S.Bool("vrr_flips"));
 		antiLag = Switch(S.Bool("antilag") && context.AmdGpu, context.AmdGpu);
 		keepResident = Switch(S.Bool("keep_resident"));
 		fps30 = Switch(S.Bool("fps30"));
@@ -891,6 +906,8 @@ partial class MainWindow : Window {
 			Section("experimental.display"),
 			Row("presentdirect", presentDirect, Desc(T("presentdirect.desc"))),
 			Row(null, Feedback(37)),
+			Row("vrrflips", vrrFlips, Desc(T("vrrflips.desc"))),
+			Row(null, Feedback(221)),
 			Section("experimental.memory"),
 			Row("keepresident", keepResident, Desc(T("keepresident.desc"))),
 			Row(null, Feedback(50)),
@@ -918,6 +935,14 @@ partial class MainWindow : Window {
 		if (building) return;
 		ReadForm();
 		UpdateSummary();
+	}
+
+	// The Sharpening row's value back to the upscaler it shows (the other's stays as it was).
+	void KeepSharpness() {
+		if (sharpness == null) return;
+		var value = Value(sharpness) as string ?? "";
+		if (sharpnessShown == "dlss") dlssSharpness = value;
+		else if (sharpnessShown == "fsr") fsrSharpness = value;
 	}
 
 	// The controls into the settings, saved (launcher.ps1's Read-Form).
@@ -950,12 +975,15 @@ partial class MainWindow : Window {
 		var chosenUpscaler = Value(upscaler) as string ?? "";
 		if (!(S.Str("upscaler") == "dlss" && !context.FrameGenAvailable && chosenUpscaler.Length == 0)) S.Set("upscaler", chosenUpscaler);
 		S.Set("dlss_preset", Value(dlssModel) as string ?? "");
-		S.Set("dlss_sharpness", Value(dlssSharpness) as string ?? "");
+		KeepSharpness();
+		S.Set("dlss_sharpness", dlssSharpness == "0" ? "" : dlssSharpness);
+		S.Set("fsr_sharpness", fsrSharpness == "0.6" ? "" : fsrSharpness);
 		S.Set("audio_output", Value(audioOutput) as string ?? "");
 		S.Set("gpu", Value(gpu) as string ?? "");
 		if (context.FsrAvailable) S.Set("fsr", fsr.IsChecked == true);
 		S.Set("ecores", ecores.IsChecked == true);
 		S.Set("present_direct", presentDirect.IsChecked == true);
+		S.Set("vrr_flips", vrrFlips.IsChecked == true);
 		S.Set("antilag", antiLag.IsChecked == true && context.AmdGpu);
 		S.Set("keep_resident", keepResident.IsChecked == true);
 		S.Set("fps30", fps30.IsChecked == true);
@@ -990,6 +1018,7 @@ partial class MainWindow : Window {
 		if (hdOutput) options.Add(T("summary.hd"));
 		if (output1440) options.Add(T("summary.1440"));
 		if (S.Bool("present_direct")) options.Add(T("summary.presentDirect"));
+		if (S.Bool("vrr_flips")) options.Add(T("summary.vrrFlips"));
 		if (S.Bool("antilag")) options.Add(T("summary.antilag"));
 		if (S.Bool("keep_resident")) options.Add(T("summary.keepResident"));
 		if (!S.Bool("pad_speaker")) options.Add(T("summary.padSpeakerOff"));

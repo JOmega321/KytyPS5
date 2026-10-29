@@ -4,6 +4,8 @@
 #include "common/logging/log.h"
 #include "common/profiler.h"
 #include "common/threads.h"
+#include "gpu_blit_shaders/gpu_blit_fs_triangle_spv.h"
+#include "gpu_blit_shaders/present_dither_spv.h"
 #include "graphics/host_gpu/graphicContext.h"
 #include "graphics/host_gpu/renderer/render.h"
 #include "graphics/host_gpu/renderer/renderContext.h"
@@ -46,6 +48,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <utility>
 #include <vector>
 #include <vulkan/vk_platform.h>
 
@@ -58,6 +61,7 @@ namespace Libs::Graphics {
 
 struct Presenter::Frame {
 	VulkanImage            image;
+	vk::ImageView          view = nullptr; // `image` sampled (the dithered copy, Swapchain::RecordDitheredCopy)
 	FrameGen::FrameInputs  fg; // frame generation inputs (KYTY_FRAMEGEN)
 	uint64_t               present_tick = 0;
 	bool                   busy         = false;
@@ -80,6 +84,7 @@ public:
 	~FramePool() {
 		m_scheduler.Wait(m_scheduler.CurrentTick() - 1);
 		for (auto& frame: m_frames) {
+			if (frame->view != nullptr) m_window.graphic_ctx.device.destroyImageView(frame->view, nullptr);
 			if (frame->image.image != nullptr) {
 				m_window.graphic_ctx.DeleteImage(frame->image);
 			}
@@ -231,6 +236,8 @@ void Presenter::Frame::Configure(GraphicContext& graphics, vk::Extent2D extent, 
 		return;
 	}
 	if (dst.image != nullptr) {
+		if (view != nullptr) graphics.device.destroyImageView(view, nullptr);
+		view = nullptr;
 		graphics.DeleteImage(dst);
 	}
 
@@ -243,13 +250,20 @@ void Presenter::Frame::Configure(GraphicContext& graphics, vk::Extent2D extent, 
 	create.format        = format;
 	create.tiling        = vk::ImageTiling::eOptimal;
 	create.initialLayout = vk::ImageLayout::eUndefined;
-	create.usage = vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst;
+	create.usage = vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst |
+	               vk::ImageUsageFlagBits::eSampled; // (the dithered copy)
 	create.sharingMode = vk::SharingMode::eExclusive;
 	create.samples     = vk::SampleCountFlagBits::e1;
 	if (!graphics.CreateImage(create, dst)) {
 		EXIT("failed to allocate prepared presentation image, extent=%ux%u format=%d\n",
 		     extent.width, extent.height, static_cast<int>(format));
 	}
+	vk::ImageViewCreateInfo info {};
+	info.image            = dst.image;
+	info.viewType         = vk::ImageViewType::e2D;
+	info.format           = format;
+	info.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1};
+	if (graphics.device.createImageView(&info, nullptr, &view) != vk::Result::eSuccess) view = nullptr;
 }
 
 void Presenter::Frame::Transit(vk::CommandBuffer command, vk::ImageLayout layout,
@@ -325,11 +339,12 @@ public:
 	void                 Recreate(bool surface_lost = false);
 	[[nodiscard]] Status AcquireNextImage();
 	[[nodiscard]] bool   PrepareSystemOverlay(SystemOverlayHud* hud = nullptr);
+	// `source_view`: `source` sampled (the dithered copy), or null.
 	// `scene`: the frame shows the game's 3D view (Presenter::IsSceneFrame).
 	// `fsr_inputs`: the frame's inputs for FSR's HUD-less image (FrameGen::RecordHudless), or null.
 	// `target` (Linux frame generation): the frame finished into that image (the swapchain's size and format; its
 	// `target_view` for the system overlay) instead of the acquired swapchain image, left in the general layout.
-	void                 RecordPresentCommands(CommandBuffer& command, VulkanImage& source,
+	void                 RecordPresentCommands(CommandBuffer& command, VulkanImage& source, vk::ImageView source_view,
 	                                           bool draw_system_overlay, bool scene,
 	                                           const FrameGen::FrameInputs* fsr_inputs = nullptr,
 	                                           VulkanImage* target = nullptr, vk::ImageView target_view = nullptr);
@@ -358,6 +373,10 @@ public:
 private:
 	void                 Destroy();
 	vk::SurfaceFormatKHR SelectFormat();
+	// `source` (a 10-bit frame) drawn into the 8-bit `dst_image` at m_present_region with an ordered dither, where the blit
+	// rounded each pixel (issue #234: the loading screens' fog banded); false (nothing recorded) where it does not apply.
+	bool RecordDitheredCopy(vk::CommandBuffer command, VulkanImage& source, vk::ImageView source_view,
+	                        vk::Image dst_image, vk::ImageView dst_view, uint32_t src_w);
 
 	WindowContext&              m_window;
 	vk::SwapchainKHR            m_handle = nullptr;
@@ -375,6 +394,12 @@ private:
 	uint32_t                    m_image_index = static_cast<uint32_t>(-1);
 	uint32_t                    m_frame_index = 0;
 	vk::Rect2D                  m_present_region {};
+	// RecordDitheredCopy's: made on its first use and kept (a pipeline for each 8-bit format: B8G8R8A8, R8G8B8A8).
+	vk::Sampler                 m_dither_sampler    = nullptr;
+	vk::DescriptorSetLayout     m_dither_set_layout = nullptr;
+	vk::PipelineLayout          m_dither_layout     = nullptr;
+	std::array<vk::Pipeline, 2> m_dither_pipelines {};
+	bool                        m_dither_failed = false;
 };
 
 struct Presenter::Impl {
@@ -817,7 +842,7 @@ struct Presenter::Impl {
 				    (static_cast<float>(hud->drawn.offset.y - region.offset.y) + static_cast<float>(hud->drawn.extent.height) + margin) / h);
 			}
 			// (With the frame's inputs FSR 3 built in gets its HUD-less image too: FrameGen::RecordHudless.)
-			swapchain.RecordPresentCommands(command, frame.image, draw_system_overlay, frame.scene,
+			swapchain.RecordPresentCommands(command, frame.image, frame.view, draw_system_overlay, frame.scene,
 			                                frame.fg.valid && !frame.reusing_last ? &frame.fg : nullptr, &composed,
 			                                composed_view);
 			if (FrameGen::HudlessOn() && !frame.reusing_last) {
@@ -1138,6 +1163,13 @@ void Swapchain::Create() {
 
 Swapchain::~Swapchain() {
 	Destroy();
+	auto& device = m_window.graphic_ctx.device;
+	for (const auto pipeline: m_dither_pipelines) {
+		if (pipeline != nullptr) device.destroyPipeline(pipeline, nullptr);
+	}
+	if (m_dither_layout != nullptr) device.destroyPipelineLayout(m_dither_layout, nullptr);
+	if (m_dither_set_layout != nullptr) device.destroyDescriptorSetLayout(m_dither_set_layout, nullptr);
+	if (m_dither_sampler != nullptr) device.destroySampler(m_dither_sampler, nullptr);
 }
 
 void Swapchain::Destroy() {
@@ -1244,7 +1276,204 @@ bool Swapchain::PrepareSystemOverlay(SystemOverlayHud* hud) {
 	return m_system_overlay->PrepareFrame(m_extent, m_format, ImageCount(), hud);
 }
 
-void Swapchain::RecordPresentCommands(CommandBuffer& command, VulkanImage& source,
+// KYTY_PRESENT_DITHER=0: a 10-bit frame blitted into an 8-bit swapchain image as before, each pixel rounded (issue #234).
+static bool PresentDither() {
+	static const bool on = [] {
+		const char* value = std::getenv("KYTY_PRESENT_DITHER");
+		return value == nullptr || value[0] != '0';
+	}();
+	return on;
+}
+
+bool Swapchain::RecordDitheredCopy(vk::CommandBuffer command, VulkanImage& source, vk::ImageView source_view,
+                                   vk::Image dst_image, vk::ImageView dst_view, uint32_t src_w) {
+	// Where the blit rounds away bits the frame has: a 10-bit (or half-float) frame into an 8-bit image (not HDR's 10-bit).
+	const bool deep = source.format == vk::Format::eA2B10G10R10UnormPack32 ||
+	                  source.format == vk::Format::eA2R10G10B10UnormPack32 ||
+	                  source.format == vk::Format::eR16G16B16A16Sfloat;
+	if (!deep || (m_format != vk::Format::eB8G8R8A8Unorm && m_format != vk::Format::eR8G8B8A8Unorm) ||
+	    source_view == nullptr || dst_view == nullptr || m_dither_failed || !PresentDither()) {
+		return false;
+	}
+	auto& device = m_window.graphic_ctx.device;
+	auto  fail   = [this](const char* what) {
+		std::printf("Presenter: no dithered copy (%s failed): frames blitted, each pixel rounded\n", what);
+		std::fflush(stdout);
+		m_dither_failed = true;
+		return false;
+	};
+	if (m_dither_layout == nullptr) {
+		vk::SamplerCreateInfo sampler {};
+		sampler.magFilter    = vk::Filter::eLinear; // (as the blit scaled)
+		sampler.minFilter    = vk::Filter::eLinear;
+		sampler.addressModeU = vk::SamplerAddressMode::eClampToEdge;
+		sampler.addressModeV = vk::SamplerAddressMode::eClampToEdge;
+		sampler.addressModeW = vk::SamplerAddressMode::eClampToEdge;
+		if (device.createSampler(&sampler, nullptr, &m_dither_sampler) != vk::Result::eSuccess) return fail("sampler");
+		vk::DescriptorSetLayoutBinding binding {};
+		binding.binding            = 0;
+		binding.descriptorType     = vk::DescriptorType::eCombinedImageSampler;
+		binding.descriptorCount    = 1;
+		binding.stageFlags         = vk::ShaderStageFlagBits::eFragment;
+		binding.pImmutableSamplers = &m_dither_sampler;
+		vk::DescriptorSetLayoutCreateInfo set_layout {};
+		set_layout.flags        = vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptorKHR;
+		set_layout.bindingCount = 1;
+		set_layout.pBindings    = &binding;
+		if (device.createDescriptorSetLayout(&set_layout, nullptr, &m_dither_set_layout) != vk::Result::eSuccess)
+			return fail("descriptor set layout");
+		vk::PushConstantRange range {};
+		range.stageFlags = vk::ShaderStageFlagBits::eFragment;
+		range.size       = 4 * sizeof(float);
+		vk::PipelineLayoutCreateInfo layout {};
+		layout.setLayoutCount         = 1;
+		layout.pSetLayouts            = &m_dither_set_layout;
+		layout.pushConstantRangeCount = 1;
+		layout.pPushConstantRanges    = &range;
+		if (device.createPipelineLayout(&layout, nullptr, &m_dither_layout) != vk::Result::eSuccess)
+			return fail("pipeline layout");
+	}
+	auto& pipeline = m_dither_pipelines[m_format == vk::Format::eR8G8B8A8Unorm ? 1 : 0];
+	if (pipeline == nullptr) {
+		std::array<vk::ShaderModule, 2> modules {};
+		const std::array<std::pair<const uint32_t*, size_t>, 2> code {
+		    std::pair {GPU_BLIT_FS_TRIANGLE_SPV, std::size(GPU_BLIT_FS_TRIANGLE_SPV)},
+		    std::pair {PRESENT_DITHER_SPV, std::size(PRESENT_DITHER_SPV)}};
+		bool made = true;
+		for (size_t i = 0; i < modules.size() && made; ++i) {
+			vk::ShaderModuleCreateInfo create {};
+			create.codeSize = code[i].second * sizeof(uint32_t);
+			create.pCode    = code[i].first;
+			made            = device.createShaderModule(&create, nullptr, &modules[i]) == vk::Result::eSuccess;
+		}
+		if (made) {
+			std::array<vk::PipelineShaderStageCreateInfo, 2> stages {};
+			stages[0].stage  = vk::ShaderStageFlagBits::eVertex;
+			stages[0].module = modules[0];
+			stages[0].pName  = "main";
+			stages[1].stage  = vk::ShaderStageFlagBits::eFragment;
+			stages[1].module = modules[1];
+			stages[1].pName  = "main";
+			vk::PipelineVertexInputStateCreateInfo   vertex_input {};
+			vk::PipelineInputAssemblyStateCreateInfo input_assembly {};
+			input_assembly.topology = vk::PrimitiveTopology::eTriangleList;
+			vk::PipelineViewportStateCreateInfo viewport {};
+			viewport.viewportCount = 1;
+			viewport.scissorCount  = 1;
+			vk::PipelineRasterizationStateCreateInfo rasterization {};
+			rasterization.lineWidth = 1.0f;
+			vk::PipelineMultisampleStateCreateInfo multisample {};
+			multisample.rasterizationSamples = vk::SampleCountFlagBits::e1;
+			vk::PipelineColorBlendAttachmentState blend {};
+			blend.colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
+			                       vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA;
+			vk::PipelineColorBlendStateCreateInfo color_blend {};
+			color_blend.attachmentCount = 1;
+			color_blend.pAttachments    = &blend;
+			const std::array dynamic_states {vk::DynamicState::eViewport, vk::DynamicState::eScissor};
+			vk::PipelineDynamicStateCreateInfo dynamic {};
+			dynamic.dynamicStateCount = static_cast<uint32_t>(dynamic_states.size());
+			dynamic.pDynamicStates    = dynamic_states.data();
+			vk::PipelineRenderingCreateInfo rendering {};
+			rendering.colorAttachmentCount    = 1;
+			rendering.pColorAttachmentFormats = &m_format;
+			vk::GraphicsPipelineCreateInfo create {};
+			create.pNext               = &rendering;
+			create.stageCount          = static_cast<uint32_t>(stages.size());
+			create.pStages             = stages.data();
+			create.pVertexInputState   = &vertex_input;
+			create.pInputAssemblyState = &input_assembly;
+			create.pViewportState      = &viewport;
+			create.pRasterizationState = &rasterization;
+			create.pMultisampleState   = &multisample;
+			create.pColorBlendState    = &color_blend;
+			create.pDynamicState       = &dynamic;
+			create.layout              = m_dither_layout;
+			made = device.createGraphicsPipelines(nullptr, 1, &create, nullptr, &pipeline) == vk::Result::eSuccess;
+		}
+		for (const auto module: modules) {
+			if (module != nullptr) device.destroyShaderModule(module, nullptr);
+		}
+		if (!made) {
+			pipeline = nullptr;
+			return fail("pipeline");
+		}
+		std::printf("Presenter: 10-bit frames dithered into the 8-bit swapchain image (KYTY_PRESENT_DITHER=0: rounded)\n");
+		std::fflush(stdout);
+	}
+
+	const vk::ImageSubresourceRange range {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1};
+	auto barrier = [&range](vk::Image image, vk::ImageLayout from, vk::ImageLayout to, vk::AccessFlags src_access,
+	                        vk::AccessFlags dst_access) {
+		vk::ImageMemoryBarrier b {};
+		b.srcAccessMask       = src_access;
+		b.dstAccessMask       = dst_access;
+		b.oldLayout           = from;
+		b.newLayout           = to;
+		b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		b.image               = image;
+		b.subresourceRange    = range;
+		return b;
+	};
+	// The frame sampled; the swapchain image (its bars cleared by now) drawn on.
+	const std::array before {
+	    barrier(source.image, vk::ImageLayout::eTransferSrcOptimal, vk::ImageLayout::eShaderReadOnlyOptimal, {},
+	            vk::AccessFlagBits::eShaderRead),
+	    barrier(dst_image, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eColorAttachmentOptimal,
+	            vk::AccessFlagBits::eTransferWrite, vk::AccessFlagBits::eColorAttachmentWrite)};
+	command.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
+	                        vk::PipelineStageFlagBits::eFragmentShader | vk::PipelineStageFlagBits::eColorAttachmentOutput,
+	                        vk::DependencyFlags {}, 0, nullptr, 0, nullptr, static_cast<uint32_t>(before.size()),
+	                        before.data());
+	vk::RenderingAttachmentInfo color {};
+	color.imageView   = dst_view;
+	color.imageLayout = vk::ImageLayout::eColorAttachmentOptimal;
+	color.loadOp      = vk::AttachmentLoadOp::eDontCare; // (every pixel of the region drawn)
+	color.storeOp     = vk::AttachmentStoreOp::eStore;
+	vk::RenderingInfo rendering {};
+	rendering.renderArea           = m_present_region;
+	rendering.layerCount           = 1;
+	rendering.colorAttachmentCount = 1;
+	rendering.pColorAttachments    = &color;
+	command.beginRendering(rendering);
+	const vk::Viewport viewport {static_cast<float>(m_present_region.offset.x), static_cast<float>(m_present_region.offset.y),
+	                             static_cast<float>(m_present_region.extent.width),
+	                             static_cast<float>(m_present_region.extent.height), 0.0f, 1.0f};
+	command.setViewport(0, 1, &viewport);
+	command.setScissor(0, 1, &m_present_region);
+	command.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
+	vk::DescriptorImageInfo sampled {};
+	sampled.imageView   = source_view;
+	sampled.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+	vk::WriteDescriptorSet write {};
+	write.dstBinding      = 0;
+	write.descriptorCount = 1;
+	write.descriptorType  = vk::DescriptorType::eCombinedImageSampler;
+	write.pImageInfo      = &sampled;
+	command.pushDescriptorSetKHR(vk::PipelineBindPoint::eGraphics, m_dither_layout, 0, 1, &write);
+	// present_dither.frag: the region's top left, and the frame's texture coordinates per pixel (its `src_w` columns).
+	const std::array<float, 4> constants {viewport.x, viewport.y,
+	                                      static_cast<float>(src_w) / static_cast<float>(source.extent.width) / viewport.width,
+	                                      1.0f / viewport.height};
+	command.pushConstants(m_dither_layout, vk::ShaderStageFlagBits::eFragment, 0, sizeof(constants), constants.data());
+	command.draw(3, 1, 0, 0);
+	command.endRendering();
+	// Both left as the blit leaves them: the frame a transfer source, the swapchain image a transfer destination (for
+	// the HUD-less copy and the barriers after).
+	const std::array after {
+	    barrier(source.image, vk::ImageLayout::eShaderReadOnlyOptimal, vk::ImageLayout::eTransferSrcOptimal, {},
+	            vk::AccessFlagBits::eTransferRead),
+	    barrier(dst_image, vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::eTransferDstOptimal,
+	            vk::AccessFlagBits::eColorAttachmentWrite,
+	            vk::AccessFlagBits::eTransferRead | vk::AccessFlagBits::eTransferWrite)};
+	command.pipelineBarrier(vk::PipelineStageFlagBits::eFragmentShader | vk::PipelineStageFlagBits::eColorAttachmentOutput,
+	                        vk::PipelineStageFlagBits::eTransfer, vk::DependencyFlags {}, 0, nullptr, 0, nullptr,
+	                        static_cast<uint32_t>(after.size()), after.data());
+	return true;
+}
+
+void Swapchain::RecordPresentCommands(CommandBuffer& command, VulkanImage& source, vk::ImageView source_view,
                                       bool draw_system_overlay, bool scene,
                                       const FrameGen::FrameInputs* fsr_inputs, VulkanImage* target,
                                       vk::ImageView target_view) {
@@ -1339,9 +1568,10 @@ void Swapchain::RecordPresentCommands(CommandBuffer& command, VulkanImage& sourc
 	region.dstOffsets[1].x               = dst_x + dst_w;
 	region.dstOffsets[1].y               = dst_y + dst_h;
 	region.dstOffsets[1].z               = 1;
-	vk_command.blitImage(source.image, vk::ImageLayout::eTransferSrcOptimal,
-	                     dst_image, vk::ImageLayout::eTransferDstOptimal, 1, &region,
-	                     vk::Filter::eLinear);
+	if (!RecordDitheredCopy(vk_command, source, source_view, dst_image, dst_view, src_w)) {
+		vk_command.blitImage(source.image, vk::ImageLayout::eTransferSrcOptimal, dst_image,
+		                     vk::ImageLayout::eTransferDstOptimal, 1, &region, vk::Filter::eLinear);
+	}
 	// KYTY_FRAMEGEN_BACKEND=fsr: the HUD-less image from this, before the system overlay (which counts as HUD then); the
 	// Windows backend's of the swapchain image, FSR 3 built in's of the composed frame (`target`).
 	if (fsr_inputs != nullptr && (FrameGen::OwnsSwapchain() ? target == nullptr : target != nullptr)) {
@@ -1754,7 +1984,7 @@ void Presenter::Present(Frame& frame, bool reuse) {
 				    (static_cast<float>(hud->drawn.offset.x - region.offset.x) + static_cast<float>(hud->drawn.extent.width) + margin) / w,
 				    (static_cast<float>(hud->drawn.offset.y - region.offset.y) + static_cast<float>(hud->drawn.extent.height) + margin) / h);
 			}
-			swapchain.RecordPresentCommands(command, frame.image, draw_system_overlay, frame.scene, fsr_inputs);
+			swapchain.RecordPresentCommands(command, frame.image, frame.view, draw_system_overlay, frame.scene, fsr_inputs);
 			if (FrameGen::OwnsSwapchain()) {
 				FrameGen::RecordPrepare(m_impl->window.graphic_ctx, command.Handle(), fsr_inputs, swapchain.PresentRegion());
 			} else if (FrameGen::HudlessOn() && !frame.reusing_last) {

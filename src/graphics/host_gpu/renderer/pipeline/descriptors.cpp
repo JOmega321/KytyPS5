@@ -1130,10 +1130,19 @@ TextureBinding RenderExecutor::ResolveTextureUncached(
 	return {id, nullptr, std::move(desc)};
 }
 
+// Whether the program's samplers are the materials' (UpscaleBiasApplies: the color targets a pixel shader writes). Its
+// own function: a branch in PrepareBindingsInto would cost that hot path its PGO profile.
+[[gnu::noinline]] static bool MaterialSamplers(const ShaderRecompiler::IR::CompiledShaderInfo& program) {
+	uint32_t targets = 0;
+	for (const auto& output: program.info.outputs)
+		targets += output.kind == ShaderRecompiler::IR::StageOutputKind::Mrt ? 1u : 0u;
+	return UpscaleBiasApplies(program.stage == ShaderType::Pixel, targets);
+}
+
 static vk::Sampler NativeSampler(RenderContext&                       context,
                                  const ShaderRecompiler::IR::CompiledShaderInfo& program,
                                  uint32_t index,
-                                 const ShaderRecompiler::IR::DescriptorValue& value) {
+                                 const ShaderRecompiler::IR::DescriptorValue& value, bool material) {
 	auto descriptor = DecodeNativeDescriptor<ShaderSamplerResource>(value);
 	if (!program.info.samplers[index].depth_compare) {
 		descriptor.fields[0] &= ~(0x7u << 12u);
@@ -1141,7 +1150,7 @@ static vk::Sampler NativeSampler(RenderContext&                       context,
 	if (program.info.samplers[index].force_point_filtering) {
 		descriptor.SetPointFiltering();
 	}
-	return context.GetSamplerCache().GetSampler(descriptor);
+	return context.GetSamplerCache().GetSampler(descriptor, material);
 }
 
 static vk::DescriptorBufferInfo NativeUpload(RenderContext&            context,
@@ -1225,8 +1234,9 @@ void RenderExecutor::PrepareBindingsInto(const ShaderStageRuntime& runtime,
 		prepared.images.push_back(std::move(binding));
 	}
 	prepared.samplers.reserve(program.info.samplers.size());
+	const bool material = MaterialSamplers(program);
 	for (uint32_t i = 0; i < program.info.samplers.size(); i++) {
-		prepared.samplers.push_back(NativeSampler(m_context, program, i, snapshot.samplers[i]));
+		prepared.samplers.push_back(NativeSampler(m_context, program, i, snapshot.samplers[i], material));
 	}
 	prepared.shader_data.reserve(program.bindings.ShaderDataDwords());
 	for (const auto reg: program.bindings.user_data_registers) {

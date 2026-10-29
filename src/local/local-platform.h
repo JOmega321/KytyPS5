@@ -73,9 +73,28 @@ bool FlushProcessWriteBuffers();
 // below-normal priority too: background work that must not hold up the game's threads.
 void AvoidCpuList(const char* avoid_cpus);
 void MakeBackgroundThread(const char* avoid_cpus);
+// Linux, the render thread (KYTY_RENDER_CORE=<cpu>; 0 or off: not; default on the Steam Deck build: 2): the calling
+// thread on that CPU and the core it is on (its SMT siblings) kept for it alone: every other thread of the process, the
+// game's included, is moved off that core now and every 250 ms (a thread of its own; new threads inherit their
+// creator's CPUs). On a 4-core CPU the game's ten job workers shared the render thread's core: its work per frame
+// 31.5 ms with them, 28.4 ms alone. Returns the CPU (-1: not done). Windows: -1.
+int KeepRenderCoreAlone();
 // The calling thread above the normal priority of the game's threads (Windows: THREAD_PRIORITY_HIGHEST; Linux:
 // nice -10 where the nice limit allows, unless KYTY_LINUX_FAST_LOCKS=0): the render thread, which every frame waits for, is not time-sliced against them on its CPUs.
 void MakeCriticalThread();
+// While it lives, the calling thread at the normal priority if it was above it (MakeCriticalThread), then back: the render
+// thread doing the upload worker's jobs (AsyncUpload's Help) as the worker does them, not ahead of the game's threads.
+class NormalPriority {
+public:
+	NormalPriority();
+	~NormalPriority();
+	NormalPriority(const NormalPriority&)            = delete;
+	NormalPriority& operator=(const NormalPriority&) = delete;
+
+private:
+	int  m_saved   = 0;
+	bool m_changed = false;
+};
 
 // The refresh rate in Hz of the display a window is on (its HWND on Windows; 0 when unknown or elsewhere).
 int DisplayRefreshHz(void* window);
@@ -125,6 +144,11 @@ MemoryUse ProcessMemory();
 uint64_t  PhysicalMemory();
 // The physical memory the system can still give without paging (free and standby; Linux: MemAvailable). 0: unknown.
 uint64_t AvailablePhysicalMemory();
+// The RAM the emulator has: the PC's (PhysicalMemory, so KYTY_SIMULATE_RAM_MB counts) less what other programs held when
+// it started, i.e. what the system could give without paging then plus the emulator's own working set (taken at the
+// first call, made before main; logged once). The memory savings of PCs short of RAM go by it, not by the PC's RAM
+// (issue #228: a 24 GB PC whose other programs held 10 GB ran out of memory at a world load, its savings off). 0: unknown.
+uint64_t EmulatorMemory();
 // The memory the process can still commit and the commit limit (RAM and page file: Task Manager's "Committed"; Linux:
 // CommitLimit less Committed_AS, and CommitLimit, which overcommit lets programs pass), in bytes. 0: unknown.
 struct CommitState {

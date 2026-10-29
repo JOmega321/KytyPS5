@@ -46,6 +46,8 @@ uint32_t TranslatorFeatureSet() {
 	static const int slots_at_use = forced("KYTY_TABLE_SLOTS_AT_USE");
 	static const int min_max      = forced("KYTY_NATIVE_FLOAT_MIN_MAX");
 	static const int exec_selects = forced("KYTY_EXEC_SELECTS");
+	static const int group_walks  = forced("KYTY_BDA_GROUP_WALKS");
+	static const int quad_reads   = forced("KYTY_PIXEL_QUAD_READS");
 	const auto       stored       = g_translator_features.load(std::memory_order_relaxed);
 	auto             features     = (stored & g_device_features.load(std::memory_order_relaxed)) |
 	                     g_device_required.load(std::memory_order_relaxed);
@@ -56,6 +58,8 @@ uint32_t TranslatorFeatureSet() {
 	apply(slots_at_use, TranslatorFeatureTableSlotsAtUse);
 	apply(min_max, TranslatorFeatureNativeFloatMinMax);
 	apply(exec_selects, TranslatorFeatureExecSelects);
+	apply(group_walks, TranslatorFeatureBdaGroupWalks);
+	apply(quad_reads, TranslatorFeaturePixelQuadReads);
 	return features;
 }
 

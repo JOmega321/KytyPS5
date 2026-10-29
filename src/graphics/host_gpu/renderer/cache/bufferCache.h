@@ -58,6 +58,8 @@ public:
 	void                   PrintSyncState();
 	// Live "buffers <path>": the cached buffers as a tab-separated table (on the GPU thread).
 	void                   WriteBufferReport(const char* path);
+	// The staging ring's size (KYTY_STAGING_MB).
+	[[nodiscard]] uint64_t StagingSize() const { return m_staging_buffer.Size(); }
 	[[nodiscard]] bool TryInvalidateCpuWriteWindow(uint64_t fault, uint64_t begin, uint64_t size);
 	void                   ReadMemory(uint64_t vaddr, uint64_t size, bool is_write = false);
 	[[nodiscard]] Buffer&  GetBuffer(BufferId id) { return m_slot_buffers[id]; }

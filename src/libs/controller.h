@@ -105,6 +105,11 @@ int KYTY_SYSV_ABI PadGetTriggerEffectState(int handle, PadTriggerEffectStateInfo
 int KYTY_SYSV_ABI PadResetLightBar(int handle);
 int KYTY_SYSV_ABI PadSetLightBar(int handle, const PadLightBarParam* param);
 
+// The game's vibration as rumble on a pad without the DualSense's haptics (an Xbox controller, a Steam Deck's; issue
+// #236): the vibration port's audio (signed 16-bit, or float when `is_float`; `gains` the guest's per channel), its
+// peaks per channel driving the active pad's two motors. For when no DualSense haptics endpoint takes that port.
+void RumbleFromVibrationAudio(const void* data, uint32_t frames, uint32_t channels, bool is_float, const float* gains);
+
 } // namespace Libs::Controller
 
 #endif /* EMULATOR_INCLUDE_EMULATOR_CONTROLLER_H_ */

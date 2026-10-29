@@ -177,6 +177,8 @@ inline void InitializePerformanceSwitches() {
 		LocalPlatform::PinThreadToCpuList(cpus);
 		enabled += std::string(enabled.empty() ? "" : " ") + "KYTY_RENDER_CPUS=" + cpus;
 	}
+	if (const int core = LocalPlatform::KeepRenderCoreAlone(); core >= 0)
+		enabled += std::string(enabled.empty() ? "" : " ") + "KYTY_RENDER_CORE=" + std::to_string(core);
 	// Above the game's threads (KYTY_RENDER_PRIORITY=0: normal). Walking into a new area, the game's threads
 	// streaming it in held the render CPUs for whole time slices: frames of 35-50 ms where the render thread
 	// ran 10-14 ms, its samples parked for 20-26 ms at one instruction.

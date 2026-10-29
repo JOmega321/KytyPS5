@@ -413,6 +413,7 @@ set(gpu_blit_shader_sources
 	"${gpu_tiler_shader_dir}/gpu_blit_color_to_ms_depth.frag"
 	"${gpu_tiler_shader_dir}/gpu_imgui_hdr.frag"
 	"${gpu_tiler_shader_dir}/fsr_hud_mask.frag"
+	"${gpu_tiler_shader_dir}/present_dither.frag"
 )
 foreach(shader_source IN LISTS gpu_blit_shader_sources)
 	get_filename_component(shader_name "${shader_source}" NAME_WE)
@@ -450,8 +451,6 @@ list(APPEND kyty_emulator_src
 	"${KYTY_SOURCE_DIR}/local/fsr-native.cpp"
 	"${KYTY_SOURCE_DIR}/local/fsr4.cpp"
 	"${KYTY_SOURCE_DIR}/local/fsr411/fsr411.cpp"
-	"${KYTY_SOURCE_DIR}/local/debug-snapshot.h"
-	"${KYTY_SOURCE_DIR}/local/debug-snapshot.cpp"
 	"${KYTY_SOURCE_DIR}/local/perf-overlay.h"
 	"${KYTY_SOURCE_DIR}/local/perf-overlay.cpp"
 	"${KYTY_SOURCE_DIR}/local/resource-plan-serial.h"
@@ -1019,7 +1018,7 @@ if((LINUX OR WIN32) AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
 		DEPENDS "${recording_generator}" "${vulkan_registry}" "${vulkan_hpp}"
 		VERBATIM)
 	foreach(recording_target kyty_emulator kyty_shader_precompile shader_recompiler_compute_tests xpr_replay_tests
-			virtual_memory_allocation_tests pad_input_tests)
+			virtual_memory_allocation_tests pad_input_tests shader_cfg_tests)
 		target_sources(${recording_target} PRIVATE
 			"${KYTY_SOURCE_DIR}/local/vulkan-recording.cpp" "${recording_generated}")
 		target_include_directories(${recording_target} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")

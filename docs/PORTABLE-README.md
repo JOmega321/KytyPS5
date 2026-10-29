@@ -65,6 +65,13 @@ folder (usually named `PPSA01341-app0`).
   `_PipelineCache`, about 6 GB) on an SSD. Unpacked on a busy hard disk, every small read of the game
   waited 100-500 ms: long area loads and freezes while walking; packed, with the emulator on the SSD, it
   ran at full speed ([#91](https://github.com/chenxiao07/KytyPS5/issues/91)).
+- Microsoft Defender scans each game file the first time it is opened in a session (about 117,000 files
+  in 6 minutes of play), and while the game streams those scans take CPU from it: runs of slow frames. A
+  `.zar` is one file, scanned once. Or exclude the game folder: Windows Security > Virus & threat
+  protection > Manage settings > Add or remove exclusions > Add an exclusion > Folder (Defender then no
+  longer scans that folder: only for a game copy you trust). Measured with the folder excluded: the 99th
+  percentile frame time 31.5 -> 26 ms, the 1% lows 30 -> 36 fps
+  ([#240](https://github.com/chenxiao07/KytyPS5/issues/240), @DevList1454).
 
 ### Add-on content (DLC)
 
@@ -87,7 +94,7 @@ folder (usually named `PPSA01341-app0`).
 **Double-click `KytyLauncher.exe`** (or `launcher.cmd`) for the settings window, in English or Chinese. Its
 pages: **Play** (the game folder or `.zar`; checks of the game, graphics card, RAM, precompiled shaders and
 DLSS/FSR; the Play button), **Display** (resolution, aspect ratio, fullscreen, HDR, up to 120 fps, VSync, low
-latency), **Graphics** (upscaler, render height with each height's DLSS mode, game output, DLSS model and
+latency), **Graphics** (upscaler, render height with each height's DLSS mode, game output, DLSS model,
 sharpening, graphics preset, frame generation), **Game** (console
 language, cheats), **Shaders** (precompile, optionally on the efficiency cores only so the PC stays responsive;
 export shader hints), **Advanced** (performance overlay, red-zone protection, safe GPU mode, the graphics card on a
@@ -124,10 +131,11 @@ screens are stretched to the width; the lock-on and enemy health bars stay on th
 2160 at 21:9 ended the game at start-up; the emulator now lowers such a height by itself.
 "Graphics" (Standard by default, as on the PS5) sets how much the game draws. Low picks the level of
 detail as for a 720-line picture and ends sun shadows at 125 m (250 m); Lowest picks detail as for 480
-lines, ends sun shadows at 60 m and turns off ambient shadowing
-and the shadows of torches and other lamps. Each thing drawn costs the emulator processor time, so these
+lines, ends sun shadows at 60 m and turns off ambient shadowing, the shadows of torches and other lamps, and the
+decals laid onto surfaces (blood, scorch marks). Each thing drawn costs the emulator processor time, so these
 help where the processor limits the frame rate (a laptop Ryzen 9 5900HX standing at the Gates of
-Boletaria: 21.9 fps at Standard, 25.6 at Lowest).
+Boletaria: 21.9 fps at Standard, 25.6 at Lowest); the decals alone took Lowest on an RTX 5090 at Boletaria from 86
+to 96 fps standing, the graphics card's work a frame 22% less.
 "Upscaler" (Game by default, as on the PS5) with "DLSS (PS5 Pro path)" runs the game's own PS5 Pro mode:
 its 3D at the render height (1080 at least, or 720 for DLSS's Ultra Performance) is made a real 3840x2160 image by NVIDIA DLSS in place of Sony's
 PS5 Pro upscaler, and the game finishes it at 4K (bloom, depth of field, the HUD), instead of anti-aliasing
@@ -141,8 +149,9 @@ DLSS, on any graphics card, AMD and Intel included: it is built into the emulato
 The render heights show their mode as with DLSS (FSR's "Native AA" at the output's own size). The in-game
 "Cinematic" mode stays native 4K without DLSS or FSR.
 The game's own TAA sharpens its picture; DLSS in its place does not, so fine detail (armour, cloth) looks softer
-with it. "DLSS sharpening" (Off by default; Low, Medium, High) sharpens DLSS's picture with RCAS, the sharpening
-FSR 3 uses (`-Set KYTY_DLSS_SHARPNESS=0.6` on a `run.cmd` line, 0 to 1); the higher levels can show halos on edges.
+with it. "Sharpening" (Off, Low, Medium, High) sharpens the upscaler's picture with RCAS, the sharpening FSR 3 uses:
+Off by default with DLSS (`-Set KYTY_DLSS_SHARPNESS=0.6` on a `run.cmd` line, 0 to 1), Medium with FSR 3, its own
+(`-Set KYTY_FSR_SHARPNESS=0.3`; 0 none); each upscaler keeps its own. The higher levels can show halos on edges.
 With DLSS or FSR 3 below their output's size, the game's textures are read with the detail of the output's size
 rather than the render height's (a texture LOD bias of log2(render height / output height), as NVIDIA's DLSS guide
 recommends; `-Set KYTY_UPSCALE_LOD_BIAS=0` turns it off).
@@ -232,7 +241,7 @@ shortcut):
 | `-HdOutput` | The game's own 1080p output (the launcher's "Game output: 1080p"): post-processing and HUD at 1920×1080, the 3D at most 1080 high; with `-Upscaler dlss`, DLSS makes the 1080p picture from it. Without it (and without `-RenderHeight`, `-Upscaler` or `-Aspect`) the game takes it by itself for a window or screen at most 1080 lines high; `-Set KYTY_HD_OUTPUT=0` keeps the 4K output |
 | `-OutputHeight 1440` | With `-Upscaler dlss` or `-Upscaler fsr`: the PS5 Pro path's output at that height (1080–2159, 16:9; 2560×1440 for 1440, the launcher's "Game output: 1440p"), the HUD in the game's 4K layout at that size; `-RenderHeight` picks the mode (1440 DLAA, 960 Quality, 840 Balanced, 720 Performance, 480 Ultra Performance) |
 | `-Aspect 21:9` | The 3D rendered wider (`21:9` or `32:9`) for ultrawide displays; the HUD keeps its shape at the sides; in-game menus, movies and loading screens are stretched to the width (with `-AspectFit` too: movies, the title and loading screens keep their 16:9, with black bars at the sides) |
-| `-Quality low` | How much the game draws: `low` or `lowest` (shorter shadows, simpler distant detail), faster where the processor limits the frame rate |
+| `-Quality low` | How much the game draws: `low` or `lowest` (shorter shadows, simpler distant detail; `lowest` also without ambient and torch shadows and decals), faster where the processor or the graphics card limits the frame rate |
 | `-TextureReduce 2` | Large textures without their largest levels: `1` half the size per side (the default with less than 12 GB of video memory), `2` a quarter, `0` whole |
 | `-Fps120` | The game's frame rate up to 120 fps instead of 60 (the launcher's "Up to 120 fps") |
 | `-Set KYTY_FLIP_RATE=1` | The game locked to a steady 30 fps, at the same game speed: half the work, even frame times; movies and menus stay at 60 (the launcher's Experimental "Lock to 30 fps") |
@@ -241,7 +250,8 @@ shortcut):
 | `-Hdr` | HDR10 output when Windows' "Use HDR" is on for the display |
 | `-Upscaler dlss` | DLSS super resolution through the game's PS5 Pro path (NVIDIA RTX, needs Streamline: see "Upscaler" above) |
 | `-Upscaler fsr` | The same with AMD FSR 3, built in: any graphics card |
-| `-Set KYTY_DLSS_SHARPNESS=0.6` | With `-Upscaler dlss`: DLSS's picture sharpened, 0 to 1 (the launcher's "DLSS sharpening": Low 0.3, Medium 0.6, High 0.9) |
+| `-Set KYTY_DLSS_SHARPNESS=0.6` | With `-Upscaler dlss`: DLSS's picture sharpened, 0 to 1 (the launcher's "Sharpening": Low 0.3, Medium 0.6, High 0.9; none by default) |
+| `-Set KYTY_FSR_SHARPNESS=0.3` | With `-Upscaler fsr`: FSR 3's own sharpening, 0 (none) to 1 (the launcher's "Sharpening"; 0.6, Medium, by default) |
 | `-FrameGen 1` | DLSS frame generation, the number of generated frames per rendered one (`1` = 2x, up to `5`; RTX 40 or newer, needs Streamline) |
 | `-Gpu 1` | The graphics card on a PC with more than one: its number in the log's `Vulkan GPU <n>:` lines, or a part of its name (`-Gpu 4090`); give `precompile.cmd` the same `-Gpu`, so the shaders are compiled for that card. Without it the first discrete GPU, in the order Windows' graphics settings give |
 | `-Set KEY=VALUE` | An emulator switch, e.g. `-Set KYTY_SHADER_PREFETCH=0` (several: `-Set A=1,B=2`); the issues name the ones worth trying |
@@ -367,7 +377,6 @@ Default keyboard layout:
 | F7 | Camera with the mouse (press again to release the mouse) |
 | Space, Pause | **Pause / resume the emulation** (careful not to hit Space by accident; once your own keys give Space to the game, only Pause) |
 | F8 | The emulator's overlay: Off, Frame rate, Detailed (the launcher's "Overlay" is where it starts) |
-| F9 | **Debug snapshot**: pauses the game and saves the picture on screen and where you are (`_DebugSnapshots\<date-time>\`: `screen.png`, `info.txt` with the position, the run's log and the switches); F9 again resumes. Attach the folder to an issue when something looks wrong |
 | F11, Alt+Enter | Toggle full screen |
 
 The keyboard has no L2 / R2 by default: use a gamepad when you need them.
@@ -393,7 +402,7 @@ With any of them, only your own keys work on the keyboard (none of the layout ab
   `"--keymap", "Down=Mouse:WheelDown"` switch spells and items).
 - A control takes one key and one mouse input (`Up=Up` with `Up=Mouse:WheelUp`: both work); a second key, or a second
   mouse input, for the same control replaces the first.
-- F7, F8, F9 and F11 stay the emulator's. A line it cannot use is skipped, and the run log says which and why
+- F7, F8 and F11 stay the emulator's. A line it cannot use is skipped, and the run log says which and why
   (`Input mapping skipped: ...`).
 - An update's `launch.json` replaces yours: keep a copy of your lines.
 
@@ -411,7 +420,6 @@ With any of them, only your own keys work on the keyboard (none of the layout ab
 | `hinted-<title>_<version>.seeds` | The recorded play of the package's hints and of your own play with the code of your game files (made by each precompile, from `released-<title>_<version>.seeds` and `recorded-play-<title>_<version>.hints`; the `.seeds` files contain the game's shader code: do not share them) |
 | `launch.json` | The emulator's command line and extra switches; normally left alone |
 | `launcher-settings.json` | The launcher's settings |
-| `_DebugSnapshots` | The F9 debug snapshots (picture, position, log), to attach to an issue |
 | `Content\<title>`, `dlc_emu.ini` | Add-on content (DLC), if you add it (see "Add-on content") |
 
 ## Updating to a newer package

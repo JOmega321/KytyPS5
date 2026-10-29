@@ -296,6 +296,8 @@ struct Upscaler {
 		dispatch.depth         = ToResource(inputs.depth, L"KytyFsrDepth", false);
 		dispatch.motionVectors = ToResource(inputs.motion, L"KytyFsrMotion", false);
 		dispatch.output        = ToResource(inputs.output, L"KytyFsrOutput", true);
+		// (The game's reactive mask: the pixels taken from this frame rather than the history, issue #232.)
+		if (inputs.reactive.image) dispatch.reactive = ToResource(inputs.reactive, L"KytyFsrReactive", false);
 		// (Render pixels, as DLSS takes them; the game's vectors times their scale: render pixels to the previous position.)
 		dispatch.jitterOffset      = {jitter_x * inputs.jitter_x, jitter_y * inputs.jitter_y};
 		// Live switch fsr_mv_mode (a diagnostic): 1 the vectors negated, 2 none (zero), 3 half the scale.

@@ -18,8 +18,11 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <vector>
 
 namespace Libs::Controller {
@@ -121,7 +124,8 @@ public:
 	void ResetInputState();
 	void ReleaseHostPads();
 	void GetConnectionInfo(bool* flag, int* count);
-	void SetVibration(uint8_t large_motor, uint8_t small_motor);
+	// The active pad's name when it took the rumble, else nullptr (no pad, or the pad refused it).
+	const char* SetVibration(uint8_t large_motor, uint8_t small_motor);
 	void SetLightBar(uint8_t r, uint8_t g, uint8_t b);
 	bool SetTriggerEffect(const PadTriggerEffectParam& param);
 	int32_t GetTriggerEffectState(bool left);
@@ -545,23 +549,26 @@ void GameController::ReleaseHostPads() {
 	ReportDroppedStates();
 }
 
-void GameController::SetVibration(uint8_t large_motor, uint8_t small_motor) {
+const char* GameController::SetVibration(uint8_t large_motor, uint8_t small_motor) {
 	Common::LockGuard lock(m_mutex);
 
 	if (m_active_id == HOST_INPUT_CONTROLLER_ID) {
-		return;
+		return nullptr;
 	}
 
 	auto* pad = SDL_GameControllerFromInstanceID(static_cast<SDL_JoystickID>(m_active_id));
 	if (pad == nullptr) {
-		return;
+		return nullptr;
 	}
 
 	const auto large = static_cast<uint16_t>(large_motor * 0x101U);
 	const auto small = static_cast<uint16_t>(small_motor * 0x101U);
 	if (SDL_GameControllerRumble(pad, large, small, RUMBLE_DURATION_MS) != 0) {
 		LOGF("\t rumble failed: %s\n", SDL_GetError());
+		return nullptr;
 	}
+	const char* name = SDL_GameControllerName(pad);
+	return name != nullptr ? name : "a pad";
 }
 
 void GameController::SetLightBar(uint8_t r, uint8_t g, uint8_t b) {
@@ -927,6 +934,72 @@ int KYTY_SYSV_ABI PadRead(int handle, PadData* data, int num) {
 	}
 
 	return ret_num;
+}
+
+// Demon's Souls sends its vibration only as haptic audio for the DualSense's actuators (the vibration port), never through
+// PadSetVibration, so an Xbox controller never vibrated (issue #236). Each channel's peak (left the large motor, right
+// the small one) is held with a decay, as the DualSense on Bluetooth's motors are (dualSenseHaptics.cpp
+// RumbleFromHaptics: x0.6 per 21.3 ms, so a single hit ends in ~250 ms and hits in consecutive blocks join), and the
+// motors are set once per 1024 frames (21.3 ms at 48 kHz). KYTY_PAD_RUMBLE_GAIN=<0..16> scales the drive (2 by
+// default, the DualSense motors' reference; 0 leaves the motors alone). KYTY_PAD_RUMBLE_ONSET=<0..1>: the level a block
+// needs to drive them (0.025, as the DualSense's: a quiet effect the game keeps playing, an enchanted weapon's hum at
+// 0.005-0.01, rumbled the whole buff long, issue #239; hits reach 0.25).
+void RumbleFromVibrationAudio(const void* data, uint32_t frames, uint32_t channels, bool is_float, const float* gains) {
+	static const float gain = [] {
+		const char* value = std::getenv("KYTY_PAD_RUMBLE_GAIN");
+		return value != nullptr && *value != 0 ? std::clamp(std::strtof(value, nullptr), 0.0f, 16.0f) : 2.0f;
+	}();
+	static const float onset = [] {
+		const char* value = std::getenv("KYTY_PAD_RUMBLE_ONSET");
+		return value != nullptr && *value != 0 ? std::clamp(std::strtof(value, nullptr), 0.0f, 1.0f) : 0.025f;
+	}();
+	if (gain == 0.0f || data == nullptr || frames == 0 || channels == 0 || g_controller == nullptr) {
+		return;
+	}
+	constexpr float    DECAY = 0.6f, FLOOR = 0.01f;
+	constexpr uint32_t STEP  = 1024;
+	static std::mutex  mutex;
+	static float       peak[2] {}, held[2] {};
+	static uint32_t    pending = 0;
+	std::lock_guard    lock(mutex);
+	for (uint32_t i = 0; i < frames; i++) {
+		for (uint32_t c = 0; c < channels; c++) {
+			const size_t at    = static_cast<size_t>(i) * channels + c;
+			float        value = is_float ? static_cast<const float*>(data)[at]
+			                              : static_cast<float>(static_cast<const int16_t*>(data)[at]) / 32768.0f;
+			if (gains != nullptr) value *= gains[c];
+			auto& motor = peak[std::min<uint32_t>(c, 1)];
+			motor       = std::max(motor, std::fabs(value));
+		}
+	}
+	if (channels == 1) peak[1] = peak[0];
+	pending += frames;
+	if (pending < STEP) {
+		return;
+	}
+	pending = 0;
+	const bool was_live = held[0] != 0.0f || held[1] != 0.0f;
+	for (int m = 0; m < 2; m++) {
+		held[m] = std::max(peak[m] >= onset ? peak[m] : 0.0f, held[m] * DECAY);
+		peak[m] = 0.0f;
+	}
+	if (held[0] < FLOOR && held[1] < FLOOR) {
+		held[0] = held[1] = 0.0f;
+		// (Stopped explicitly once: a hit that ends must not leave the motors at its last level.)
+		if (was_live) g_controller->SetVibration(0, 0);
+		return;
+	}
+	const auto to_motor = [](float value) { return static_cast<uint8_t>(std::clamp(value * gain, 0.0f, 1.0f) * 255.0f); };
+	const char* pad = g_controller->SetVibration(to_motor(held[0]), to_motor(held[1]));
+	// (Once a pad took it, and once the first time none did: whether the game's vibration reaches a pad.)
+	static bool noted = false, no_pad = false;
+	if (pad != nullptr ? !noted : !no_pad) {
+		(pad != nullptr ? noted : no_pad) = true;
+		std::printf("Pad rumble: the game's vibration %s%s (no DualSense haptics; KYTY_PAD_RUMBLE_GAIN %.1f)\n",
+		            pad != nullptr ? "drives the motors of " : "has no pad that takes rumble",
+		            pad != nullptr ? pad : "", static_cast<double>(gain));
+		std::fflush(stdout);
+	}
 }
 
 int KYTY_SYSV_ABI PadSetVibration(int handle, const PadVibrationParam* param) {

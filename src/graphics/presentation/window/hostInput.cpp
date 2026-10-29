@@ -180,10 +180,9 @@ public:
 				}
 			}
 
-			// The emulator's own keys: F7 the mouse camera, F8 its overlay, F9 a debug snapshot, F11 full screen.
-			// (Space pauses unless a mapping takes it, the Pause key then; the system's dialogs see Esc first.)
-			const bool reserved = binding.key == SDLK_F7 || binding.key == SDLK_F8 || binding.key == SDLK_F9 ||
-			                      binding.key == SDLK_F11;
+			// The emulator's own keys: F7 the mouse camera, F8 its overlay, F11 full screen. (Space pauses unless a
+			// mapping takes it, the Pause key then; the system's dialogs see Esc first.)
+			const bool reserved = binding.key == SDLK_F7 || binding.key == SDLK_F8 || binding.key == SDLK_F11;
 			if (binding.control == INVALID_CONTROL || reserved ||
 			    (binding.key == SDLK_UNKNOWN && binding.mouse_button == 0)) {
 				// (Skipped, not the end of the start-up: the other mappings still work.)
@@ -402,11 +401,26 @@ void HostInputInit() {
 	GetInputMap();
 }
 
+// The Steam Deck build leaves the keyboard's default pad keys out (KYTY_DECK_KEYBOARD=1 keeps them): started outside
+// Steam, Steam's desktop layout sends keys for the Deck's sticks and buttons on top of the controller itself (the arrow
+// keys pressed the D-pad: the equipment changed while walking). A keymap's keys still count.
+static bool DefaultKeysUsed() {
+#if defined(KYTY_STEAM_DECK)
+	static const bool used = [] {
+		const char* value = std::getenv("KYTY_DECK_KEYBOARD");
+		return value != nullptr && std::string_view(value) == "1";
+	}();
+	return used;
+#else
+	return true;
+#endif
+}
+
 void HostInputKey(int key_code, bool down) {
 	const auto& map = GetInputMap();
 	if (map.Custom()) {
 		SetControl(map.FindKey(key_code), down, FROM_KEY);
-	} else {
+	} else if (DefaultKeysUsed()) {
 		DefaultKeyboardInput(key_code, down);
 	}
 }
@@ -414,6 +428,10 @@ void HostInputKey(int key_code, bool down) {
 bool HostInputMapsKey(int key_code) {
 	const auto& map = GetInputMap();
 	return map.Custom() && map.FindKey(key_code) != INVALID_CONTROL;
+}
+
+bool HostInputDefaultKeysUsed() {
+	return DefaultKeysUsed();
 }
 
 void HostInputMouseButton(uint8_t mouse_button, bool down) {
@@ -518,6 +536,20 @@ static bool        g_cursor_hidden = false;
 static bool        g_cursor_known  = false;
 static int         g_cursor_x = 0, g_cursor_y = 0; // where the mouse last counted as moved
 
+// KYTY_HIDE_CURSOR=1: the cursor never shows over the window; 0: as above. The Steam Deck build's default is 1: Steam
+// Input's own mouse (the gyro, the trackpads) moved it into view while the right stick turned the camera.
+static bool CursorAlwaysHidden() {
+	static const bool hidden = [] {
+		const char* value = std::getenv("KYTY_HIDE_CURSOR");
+#if defined(KYTY_STEAM_DECK)
+		return value == nullptr || std::string_view(value) != "0";
+#else
+		return value != nullptr && std::string_view(value) == "1";
+#endif
+	}();
+	return hidden;
+}
+
 static void NoteCursorEvent(const SDL_Event& event) {
 	if (event.type != SDL_MOUSEMOTION) return;
 	// (Motion of a few pixels is not counted: a mouse resting on the desk, or its software, can report tiny moves on its
@@ -528,7 +560,7 @@ static void NoteCursorEvent(const SDL_Event& event) {
 	g_cursor_x     = event.motion.x;
 	g_cursor_y     = event.motion.y;
 	g_cursor_moved = SDL_GetTicks64();
-	if (g_cursor_hidden) {
+	if (g_cursor_hidden && !CursorAlwaysHidden()) {
 		SDL_ShowCursor(SDL_ENABLE);
 		g_cursor_hidden = false;
 	}
@@ -544,7 +576,7 @@ bool HostInputWaitEvent(SDL_Event* event) {
 		CenterMouseStick();
 		const uint64_t now = SDL_GetTicks64();
 		if (g_cursor_moved == 0) g_cursor_moved = now;
-		if (!g_cursor_hidden && now >= g_cursor_moved + CURSOR_HIDE_MS) {
+		if (!g_cursor_hidden && (CursorAlwaysHidden() || now >= g_cursor_moved + CURSOR_HIDE_MS)) {
 			SDL_ShowCursor(SDL_DISABLE);
 			g_cursor_hidden = true;
 		}

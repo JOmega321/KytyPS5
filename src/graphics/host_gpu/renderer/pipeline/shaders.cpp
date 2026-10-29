@@ -225,11 +225,11 @@ static void AddLayoutBindings(std::vector<vk::DescriptorSetLayoutBinding>& descr
 
 // The precompile's capture (PipelineBinaryWriter): a pipeline the static pipeline cache holds (the first
 // store is made from it), its binaries then from the driver's own cache (a pipeline created with the
-// capture flag is never a cache hit: compiled); else compiled with its binaries kept.
+// capture flag is never a cache hit: compiled); else compiled with its binaries kept, in no pipeline cache
+// (the capture flag takes none: VUID-vkCreateGraphicsPipelines-pNext-09617).
 template <typename Info, typename Create>
 static vk::Result CapturePipelineBinaries(GraphicContext& graphics, PipelineCache::Pipeline& pipeline, Info info,
-                                          vk::PipelineCache driver_cache, const PipelineBinaries::Key& key,
-                                          Create create) {
+                                          const PipelineBinaries::Key& key, Create create) {
 	auto* writer = graphics.pipeline_binary_writer;
 	if (graphics.static_pipeline_cache != nullptr && graphics.pipeline_cache_control_enabled) {
 		auto lookup = info;
@@ -245,7 +245,7 @@ static vk::Result CapturePipelineBinaries(GraphicContext& graphics, PipelineCach
 	              vk::PipelineCreateFlagBits2KHR::eCaptureDataKHR;
 	flags.pNext       = info.pNext;
 	info.pNext        = &flags;
-	const auto result = create(driver_cache, info);
+	const auto result = create(nullptr, info);
 	if (result == vk::Result::eSuccess && !writer->Capture(key, pipeline.pipeline)) {
 		std::printf("Pipeline binaries: the driver gave none for a pipeline\n");
 	}
@@ -807,7 +807,7 @@ static vk::Result CreatePipelineHandle(GraphicContext& graphics, PipelineCache::
 				}
 			}
 			if (writer == nullptr && PipelineKeyLog()) LogPipelineKey("miss", key, original);
-			if (writer != nullptr) return CapturePipelineBinaries(graphics, pipeline, info, driver_cache, key, create);
+			if (writer != nullptr) return CapturePipelineBinaries(graphics, pipeline, info, key, create);
 		} else if (writer == nullptr && store != nullptr) {
 			g_binary_outcomes.Count(g_binary_outcomes.unasked);
 		}
@@ -880,6 +880,8 @@ static vk::Result CreatePipelineHandle(GraphicContext& graphics, PipelineCache::
 		return vk::Result::eSuccess;
 	}
 	// A pipeline compiled now (in no cache) is kept for the sessions after (PlayedPipelines); a driver cache's is not.
+	// Created in no pipeline cache: the capture flag takes none (VUID-vkCreateGraphicsPipelines-pNext-09617); the driver
+	// cache given before was neither searched nor added to (NVIDIA 617.42, RADV 26.0).
 	if (build == PipelineBuild::Full && keyed && played != nullptr && played->Capturing() &&
 	    graphics.pipeline_cache_control_enabled) {
 		if (cached(driver_cache)) return vk::Result::eSuccess;
@@ -889,7 +891,7 @@ static vk::Result CreatePipelineHandle(GraphicContext& graphics, PipelineCache::
 		flags.pNext       = info.pNext;
 		auto kept         = info;
 		kept.pNext        = &flags;
-		const auto result = create(driver_cache, kept);
+		const auto result = create(nullptr, kept);
 		if (result == vk::Result::eSuccess) played->Capture(key, pipeline.pipeline);
 		return result;
 	}

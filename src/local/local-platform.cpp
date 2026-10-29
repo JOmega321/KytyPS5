@@ -40,6 +40,7 @@
 #include <string>
 #include <thread>
 #else
+#include <cerrno>
 #include <cstdio>
 #include <ctime>
 #include <dirent.h>
@@ -972,6 +973,20 @@ void MakeCriticalThread() {
 	(void)SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
 }
 
+NormalPriority::NormalPriority() {
+	m_saved   = GetThreadPriority(GetCurrentThread());
+	m_changed = m_saved != THREAD_PRIORITY_ERROR_RETURN && m_saved > THREAD_PRIORITY_NORMAL &&
+	          SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_NORMAL) != 0;
+}
+
+NormalPriority::~NormalPriority() {
+	if (m_changed) (void)SetThreadPriority(GetCurrentThread(), m_saved);
+}
+
+int KeepRenderCoreAlone() {
+	return -1;
+}
+
 namespace {
 // d3dkmthk.h (WDK) structures for the display's vertical blank, taken from gdi32 at run time.
 using KmtHandle = UINT;
@@ -1157,11 +1172,20 @@ void ReturnFocus(void* window) {
 			AttachThreadInput(self, foreground, FALSE);
 		}
 	}
+	// Also as Alt+Tab switches to it: Big Picture, in front again and "given back", still showed no focus and took no pad
+	// input until an Alt+Tab (issue #217).
+	if (given) SwitchToThisWindow(target, TRUE);
 	std::printf("Focus: %s window %p, %s (%s)\n", given ? "given back to" : "not taken by", static_cast<void*>(target),
 	            DescribeWindow(target).c_str(),
 	            target == started ? "the one in front as the game started" : "the largest of the launcher's parent's");
 	std::fflush(stdout);
 	if (own != nullptr) ShowWindow(own, SW_HIDE);
+	// (Which window is in front a moment later, the game's hidden: one that took the focus after the hand-off shows here.)
+	std::this_thread::sleep_for(std::chrono::milliseconds(300));
+	const HWND later = GetForegroundWindow();
+	std::printf("Focus: 0.3 s later in front: %s\n",
+	            later == target ? "that window" : later == nullptr ? "no window" : DescribeWindow(later).c_str());
+	std::fflush(stdout);
 }
 
 bool StartDisplayVblanks(void* window) {
@@ -2136,13 +2160,93 @@ bool CurrentThreadStack(uint64_t* low, uint64_t* high) {
 	return found;
 }
 
+// KeepRenderCoreAlone: the render thread's core (bit n: CPU n), 0 when it shares its core.
+static std::atomic<uint64_t> g_render_core {0};
+
 void AvoidCpuList(const char* avoid_cpus) {
-	cpu_set_t set;
-	if (const auto avoid = CpuListMask(avoid_cpus); avoid != 0 && sched_getaffinity(0, sizeof(set), &set) == 0) {
+	cpu_set_t  set;
+	const auto core = g_render_core.load(std::memory_order_relaxed);
+	// With the render thread's core kept for it, that core is what other threads avoid, not the list (KYTY_RENDER_CPUS,
+	// e.g. "1-7": what the render thread may run on, which left a helper born on its CPU only CPU 0).
+	if (const auto avoid = core != 0 ? core : CpuListMask(avoid_cpus);
+	    avoid != 0 && sched_getaffinity(0, sizeof(set), &set) == 0) {
 		for (int cpu = 0; cpu < 64; ++cpu)
 			if ((avoid >> cpu) & 1u) CPU_CLR(cpu, &set);
+		// (A thread the render thread made inherits its one CPU: the process's other CPUs instead.)
+		if (CPU_COUNT(&set) == 0 && core != 0 && sched_getaffinity(getpid(), sizeof(set), &set) == 0)
+			for (int cpu = 0; cpu < 64; ++cpu)
+				if ((avoid >> cpu) & 1u) CPU_CLR(cpu, &set);
 		if (CPU_COUNT(&set) != 0) (void)sched_setaffinity(0, sizeof(set), &set);
 	}
+}
+
+int KeepRenderCoreAlone() {
+#if defined(__linux__)
+	const char* value = std::getenv("KYTY_RENDER_CORE");
+#if defined(KYTY_STEAM_DECK)
+	if (value == nullptr || *value == '\0') value = "2";
+#endif
+	if (value == nullptr || *value == '\0' || std::strcmp(value, "off") == 0) return -1;
+	char*      end = nullptr;
+	const auto cpu = static_cast<int>(std::strtol(value, &end, 10));
+	if (*end != '\0' || cpu <= 0 || cpu >= 64) return -1;
+	// The core: the CPU's SMT siblings ("2-3", "2,3"); the CPU alone where the file is missing.
+	uint64_t core = uint64_t {1} << cpu;
+	char     path[96];
+	std::snprintf(path, sizeof(path), "/sys/devices/system/cpu/cpu%d/topology/thread_siblings_list", cpu);
+	if (FILE* file = std::fopen(path, "r"); file != nullptr) {
+		char list[64] = {};
+		if (std::fgets(list, sizeof(list), file) != nullptr) {
+			list[std::strcspn(list, "\n")] = '\0';
+			char* save = nullptr;
+			for (char* range = strtok_r(list, ",", &save); range != nullptr; range = strtok_r(nullptr, ",", &save)) {
+				int first = 0, last = 0;
+				const int n = std::sscanf(range, "%d-%d", &first, &last);
+				for (int c = first; n >= 1 && c <= (n == 2 ? last : first) && c < 64; ++c) core |= uint64_t {1} << c;
+			}
+		}
+		std::fclose(file);
+	}
+	// The process may run on more CPUs than the core (else nothing is kept off it).
+	cpu_set_t process;
+	if (sched_getaffinity(getpid(), sizeof(process), &process) != 0 || !CPU_ISSET(cpu, &process)) return -1;
+	uint64_t allowed = 0;
+	for (int c = 0; c < 64; ++c)
+		if (CPU_ISSET(c, &process)) allowed |= uint64_t {1} << c;
+	if ((allowed & ~core) == 0) return -1;
+	cpu_set_t own;
+	MaskToSet(uint64_t {1} << cpu, &own);
+	if (sched_setaffinity(0, sizeof(own), &own) != 0) return -1;
+	g_render_core.store(core, std::memory_order_relaxed);
+	const auto render = static_cast<pid_t>(ThreadId());
+	std::thread([render, core, allowed] {
+		SetThreadName("Kyty.CoreKeeper");
+		(void)setpriority(PRIO_PROCESS, static_cast<id_t>(ThreadId()), 10);
+		cpu_set_t others;
+		MaskToSet(allowed & ~core, &others);
+		(void)sched_setaffinity(0, sizeof(others), &others);
+		for (;;) {
+			if (DIR* tasks = opendir("/proc/self/task"); tasks != nullptr) {
+				while (const dirent* entry = readdir(tasks)) {
+					const auto tid = static_cast<pid_t>(std::strtol(entry->d_name, nullptr, 10));
+					cpu_set_t  set;
+					if (tid <= 0 || tid == render || sched_getaffinity(tid, sizeof(set), &set) != 0) continue;
+					uint64_t mask = 0;
+					for (int c = 0; c < 64; ++c)
+						if (CPU_ISSET(c, &set)) mask |= uint64_t {1} << c;
+					if ((mask & core) == 0) continue;
+					MaskToSet((mask & ~core) != 0 ? mask & ~core : allowed & ~core, &set);
+					(void)sched_setaffinity(tid, sizeof(set), &set);
+				}
+				closedir(tasks);
+			}
+			std::this_thread::sleep_for(std::chrono::milliseconds(250));
+		}
+	}).detach();
+	return cpu;
+#else
+	return -1;
+#endif
 }
 
 void MakeBackgroundThread(const char* avoid_cpus) {
@@ -2159,6 +2263,18 @@ void MakeCriticalThread() {
 	}();
 	if (enabled) (void)setpriority(PRIO_PROCESS, static_cast<id_t>(ThreadId()), -10);
 #endif
+}
+
+// (Linux: back to a nice value below 0 is allowed again, RLIMIT_NICE having allowed it the first time.)
+NormalPriority::NormalPriority() {
+	errno           = 0;
+	const int value = getpriority(PRIO_PROCESS, static_cast<id_t>(ThreadId()));
+	m_saved         = value;
+	m_changed = errno == 0 && value < 0 && setpriority(PRIO_PROCESS, static_cast<id_t>(ThreadId()), 0) == 0;
+}
+
+NormalPriority::~NormalPriority() {
+	if (m_changed) (void)setpriority(PRIO_PROCESS, static_cast<id_t>(ThreadId()), m_saved);
 }
 
 int DisplayRefreshHz(void* /*window*/) {
@@ -2371,6 +2487,23 @@ bool IsAmdSigned(const std::wstring& /*path*/) {
 }
 
 #endif
+
+uint64_t EmulatorMemory() {
+	static const uint64_t memory = [] {
+		const uint64_t total     = PhysicalMemory();
+		const uint64_t available = AvailablePhysicalMemory();
+		const uint64_t own       = ProcessMemory().working_set;
+		const uint64_t usable    = total != 0 && available != 0 ? std::min(total, available + own) : total;
+		std::printf("PC memory: %llu MiB of the PC's %llu MiB for the emulator at start (other programs held %llu MiB); the "
+		            "memory savings of PCs short of RAM %s\n",
+		            static_cast<unsigned long long>(usable >> 20u), static_cast<unsigned long long>(total >> 20u),
+		            static_cast<unsigned long long>((total - usable) >> 20u),
+		            usable != 0 && usable <= (uint64_t {16} << 30u) ? "on (16 GiB or less)" : "off (more than 16 GiB)");
+		std::fflush(stdout);
+		return usable;
+	}();
+	return memory;
+}
 
 void StartHeapTrimmer() {
 	const char* value = std::getenv("KYTY_HEAP_TRIM");
