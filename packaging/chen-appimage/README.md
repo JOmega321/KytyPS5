@@ -13,9 +13,18 @@ packages installed in the workflow. Packaging does not change emulation performa
 Download the AppImage artifact from the successful workflow run, unzip it, then:
 
 ```sh
-chmod +x KytyPS5-chenxiao07-*-x86_64.AppImage
-./KytyPS5-chenxiao07-*-x86_64.AppImage
+chmod +x KytyPS5-chenxiao07-*-x86_64-*.AppImage
+./KytyPS5-chenxiao07-*-x86_64-*.AppImage
 ```
+
+AppImage filenames end with the build's start date in `MMDDYY` format, using
+America/New_York time: for example `KytyPS5-chenxiao07-abcdef12-x86_64-102826.AppImage`.
+The first published package in this dated naming series each day has no revision;
+additional packages use `102826v1`, `102826v2`, and so on. Failed builds without
+a published package do not consume a revision, and rerunning a published build
+keeps its name. Builds are serialized to avoid duplicate daily numbers. GitHub
+artifact names include the same suffix; `BUILD-INFO.json` records the source and
+naming metadata. Older artifacts retain their existing names.
 
 Choose your game in the settings window. `--emulator --help` opens the emulator's
 CLI help; `--precompile --help` selects the shader tool. Use **absolute paths**
