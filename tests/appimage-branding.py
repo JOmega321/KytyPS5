@@ -45,27 +45,23 @@ def main():
             try:
                 deadline = time.monotonic() + 20
                 while time.monotonic() < deadline:
-                    query = subprocess.run(['xprop', '-name', NAME, 'WM_NAME', 'WM_CLASS'],
+                    # SDL's accelerated renderer can recreate the native window during
+                    # startup. Query all properties together and retry if it disappears.
+                    query = subprocess.run(['xprop', '-name', NAME, '-len', '64', '-f',
+                                            '_NET_WM_ICON', '32c', 'WM_NAME', 'WM_CLASS',
+                                            '_NET_WM_ICON'],
                                            capture_output=True, text=True)
-                    if query.returncode == 0:
-                        break
                     if process.poll() is not None:
                         log.seek(0)
                         raise AssertionError('Launcher exited: ' + log.read())
-                    time.sleep(0.1)
-                else:
-                    raise AssertionError('Branded launcher window did not appear')
-                assert NAME in query.stdout, query.stdout
-                assert ID in query.stdout, query.stdout
-                while time.monotonic() < deadline:
-                    query = subprocess.run(['xprop', '-name', NAME, '-len', '64', '-f',
-                                            '_NET_WM_ICON', '32c', '_NET_WM_ICON'],
-                                           capture_output=True, text=True, check=True)
-                    if '512, 512' in query.stdout:
+                    if (query.returncode == 0 and NAME in query.stdout
+                            and ID in query.stdout and '512, 512' in query.stdout):
                         break
                     time.sleep(0.1)
                 else:
-                    raise AssertionError('Window icon not installed: ' + query.stdout)
+                    log.seek(0)
+                    raise AssertionError('Branded window properties did not settle: '
+                                         + query.stdout + query.stderr + '\n' + log.read())
                 print('Packaged window title, desktop identity and 512px window icon: OK', flush=True)
             finally:
                 process.terminate()
