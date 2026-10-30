@@ -58,7 +58,7 @@ def main():
                 assert NAME in query.stdout, query.stdout
                 assert ID in query.stdout, query.stdout
                 while time.monotonic() < deadline:
-                    query = subprocess.run(['xprop', '-name', NAME, '-len', '8', '-f',
+                    query = subprocess.run(['xprop', '-name', NAME, '-len', '64', '-f',
                                             '_NET_WM_ICON', '32c', '_NET_WM_ICON'],
                                            capture_output=True, text=True, check=True)
                     if '512, 512' in query.stdout:

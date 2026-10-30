@@ -104,8 +104,9 @@ int main(int argc, char* argv[]) {
 	// for --play.)
 	SDL_SetHint(SDL_HINT_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR, "0");
 	SDL_SetHint("SDL_APP_NAME", Branding::Name);
-	SDL_SetHint("SDL_VIDEO_X11_WMCLASS", Branding::DesktopId);
-	SDL_SetHint("SDL_VIDEO_WAYLAND_WMCLASS", Branding::DesktopId);
+	// SDL2 reads these environment variables directly, rather than through its hint API.
+	SDL_setenv("SDL_VIDEO_X11_WMCLASS", Branding::DesktopId, 1);
+	SDL_setenv("SDL_VIDEO_WAYLAND_WMCLASS", Branding::DesktopId, 1);
 	const bool video = SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER | SDL_INIT_GAMECONTROLLER) == 0;
 	if (video) context.display_height = DisplayHeight();
 
