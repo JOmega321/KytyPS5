@@ -14,6 +14,7 @@
 //   --screenshot <dir> each page saved to <dir>/<n>-<page>.bmp, then exit
 
 #include "commands.h"
+#include "branding.h"
 #include "platform.h"
 #include "strings.h"
 #include "ui.h"
@@ -26,6 +27,7 @@
 #include <imgui_impl_sdl2.h>
 #include <imgui_impl_sdlrenderer2.h>
 #include <string>
+#include <stb_image.h>
 
 namespace {
 
@@ -55,6 +57,19 @@ bool SaveScreenshot(SDL_Renderer* renderer, const std::string& file) {
 	const bool saved = read && SDL_SaveBMP(surface, file.c_str()) == 0;
 	SDL_FreeSurface(surface);
 	return saved;
+}
+
+void SetApplicationIcon(SDL_Window* window) {
+	const auto path = Platform::ExecutableFolder() / Branding::IconFile;
+	int width = 0, height = 0;
+	auto* pixels = stbi_load(path.c_str(), &width, &height, nullptr, 4);
+	if (pixels == nullptr) return; // A source build can run without packaged artwork.
+	if (auto* surface = SDL_CreateRGBSurfaceWithFormatFrom(pixels, width, height, 32, width * 4,
+	                                                     SDL_PIXELFORMAT_RGBA32)) {
+		SDL_SetWindowIcon(window, surface);
+		SDL_FreeSurface(surface);
+	}
+	stbi_image_free(pixels);
 }
 
 } // namespace
@@ -88,6 +103,9 @@ int main(int argc, char* argv[]) {
 	// (Before the window: SDL's video for the display's size, which Automatic output needs, also
 	// for --play.)
 	SDL_SetHint(SDL_HINT_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR, "0");
+	SDL_SetHint("SDL_APP_NAME", Branding::Name);
+	SDL_SetHint("SDL_VIDEO_X11_WMCLASS", Branding::DesktopId);
+	SDL_SetHint("SDL_VIDEO_WAYLAND_WMCLASS", Branding::DesktopId);
 	const bool video = SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER | SDL_INIT_GAMECONTROLLER) == 0;
 	if (video) context.display_height = DisplayHeight();
 
@@ -147,12 +165,13 @@ int main(int argc, char* argv[]) {
 	if (mode.w > 0 && width > mode.w - 16) width = mode.w - 16;
 	if (mode.h > 0 && height > mode.h - 64) height = mode.h - 64;
 	SDL_Window* window =
-	    SDL_CreateWindow("KytyPS5", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width, height,
+	    SDL_CreateWindow(Branding::Name, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width, height,
 	                     SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
 	if (window == nullptr) {
 		std::fprintf(stderr, "kyty_launcher: no window (%s)\n", SDL_GetError());
 		return 1;
 	}
+	SetApplicationIcon(window);
 	SDL_SetWindowMinimumSize(window, std::min(static_cast<int>(900 * window_scale), width),
 	                         std::min(static_cast<int>(560 * window_scale), height));
 	// (A graphics driver's renderer, else SDL's software one: the window opens on any PC.)

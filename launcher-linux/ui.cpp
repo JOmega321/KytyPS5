@@ -1,4 +1,5 @@
 #include "ui.h"
+#include "branding.h"
 
 #include "strings.h"
 
@@ -572,7 +573,7 @@ void LauncherWindow::Sidebar(float width) {
 		ImGui::PopFont();
 		ImGui::Dummy({0, 2.0f * scale_});
 	}
-	ImGui::TextUnformatted("KytyPS5");
+	ImGui::TextUnformatted(Branding::Name);
 	ImGui::PushStyleColor(ImGuiCol_Text, V(TextFaintColor));
 	ImGui::PushFont(nullptr, SmallSize);
 	ImGui::TextUnformatted(T("app.subtitle"));

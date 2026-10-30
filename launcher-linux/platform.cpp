@@ -1,4 +1,5 @@
 #include "platform.h"
+#include "branding.h"
 
 #define VK_NO_PROTOTYPES
 #include <algorithm>
@@ -213,10 +214,13 @@ fs::path WriteDesktopEntry(const fs::path& folder, const fs::path& icon, std::st
 		return out + "\"";
 	};
 	std::ofstream out(file, std::ios::binary | std::ios::trunc);
-	out << "[Desktop Entry]\nType=Application\nName=KytyPS5\nComment=PS5 emulator (Demon's Souls)\n"
+	out << "[Desktop Entry]\nType=Application\nName=" << Branding::Name
+	    << "\nComment=Demon's Souls launcher with native FSR 4 upscaling\n"
 	    << "Exec=" << quoted((ExecutableFolder() / "kyty_launcher").string()) << "\n"
-	    << "Path=" << folder.string() << "\n";
-	if (!icon.empty()) out << "Icon=" << icon.string() << "\n";
+	    << "Path=" << folder.string() << "\nStartupWMClass=" << Branding::DesktopId << "\n";
+	const auto bundled_icon = ExecutableFolder() / Branding::IconFile;
+	const auto chosen_icon = fs::is_regular_file(bundled_icon, code) ? bundled_icon : icon;
+	if (!chosen_icon.empty()) out << "Icon=" << chosen_icon.string() << "\n";
 	out << "Terminal=false\nCategories=Game;Emulator;\n";
 	if (!out) {
 		if (error != nullptr) *error = file.string();

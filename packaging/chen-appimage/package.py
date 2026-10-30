@@ -142,7 +142,19 @@ for elf in (path for path in payload.rglob('*') if is_elf(path)):
     rpath = '$ORIGIN/' + os.path.relpath(libdir, elf.parent)
     subprocess.run(['patchelf', '--set-rpath', rpath, str(elf)], check=True)
     subprocess.run(['strip', '--strip-unneeded', str(elf)], check=True)
-for source in ('AppRun', 'kytyps5.desktop', 'kytyps5.svg'):
+for source in ('AppRun', 'demons-souls-kyty.desktop', 'demons-souls-kyty.png'):
     shutil.copy2(root / 'packaging/chen-appimage' / source, appdir / source)
+desktop = appdir / 'demons-souls-kyty.desktop'
+with desktop.open('a') as entry:
+    entry.write('X-AppImage-Version=' + version[:8] + '\n')
+icon = appdir / 'demons-souls-kyty.png'
+shutil.copy2(icon, payload / icon.name)
+icons = appdir / 'usr/share/icons/hicolor/512x512/apps'
+icons.mkdir(parents=True, exist_ok=True)
+shutil.copy2(icon, icons / icon.name)
+applications = appdir / 'usr/share/applications'
+applications.mkdir(parents=True, exist_ok=True)
+shutil.copy2(desktop, applications / desktop.name)
+(appdir / '.DirIcon').symlink_to(icon.name)
 (appdir / 'AppRun').chmod(0o755)
-subprocess.run(['desktop-file-validate', str(appdir / 'kytyps5.desktop')], check=True)
+subprocess.run(['desktop-file-validate', str(desktop)], check=True)

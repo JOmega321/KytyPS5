@@ -1,7 +1,14 @@
 # chenxiao07 Linux AppImage
 
-Source baseline: chenxiao07/KytyPS5 commit `60ef0a39b8909a5a49027c5447c91b7cf31c4f7f`.
-The `appimage-chenxiao07` branch keeps this variant separate from the mainline fork.
+Upstream integrated through chenxiao07/KytyPS5 commit `5aa407e10d096fe7135d522bbfe5c893b0a144b2`.
+The `chen-kytyps5-fsr4-upscaler` branch adds native FSR 4.1.2 and AppImage packaging.
+
+The application is named **Demon's Souls (KyTy)** in Gear Lever, the desktop menu
+and the Linux launcher. Its blue soul-wisp PNG is embedded at the AppDir root,
+through `.DirIcon`, in the hicolor icon theme and beside the launcher for its
+window icon. See [ICON.md](ICON.md) for artwork provenance. In Gear Lever, replace
+the existing integration with the new AppImage; a previously cached name/icon may
+need removal and reimport. Settings, saves, caches and FSR assets retain their paths.
 
 The workflow builds the native SDL2/ImGui launcher, emulator and shader precompiler
 on Ubuntu 24.04 using Clang 18, ThinLTO and x86-64-v3. It requires glibc 2.39 or

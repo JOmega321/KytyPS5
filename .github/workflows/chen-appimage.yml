@@ -20,7 +20,7 @@ jobs:
       - name: Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang lld ccache ninja-build cmake spirv-tools python3 python3-full glslang-tools patchelf desktop-file-utils xvfb xauth fonts-dejavu-core libvulkan1 libgl1-mesa-dev libx11-dev libxcursor-dev libxext-dev libxfixes-dev libxi-dev libxrandr-dev libxss-dev libxkbcommon-dev libasound2-dev libpulse-dev libudev-dev libdbus-1-dev libwayland-dev wayland-protocols
+          sudo apt-get install -y --no-install-recommends clang lld ccache ninja-build cmake spirv-tools python3 python3-full glslang-tools patchelf desktop-file-utils xvfb xauth x11-utils fonts-dejavu-core libvulkan1 libgl1-mesa-dev libx11-dev libxcursor-dev libxext-dev libxfixes-dev libxi-dev libxrandr-dev libxss-dev libxkbcommon-dev libasound2-dev libpulse-dev libudev-dev libdbus-1-dev libwayland-dev wayland-protocols
       - name: Test asset-builder process handling
         run: |
           clang++ -std=c++20 -pthread -Ilauncher-linux launcher-linux/asset-builder.cpp tests/launcher-asset-builder.cpp -o /tmp/test-asset-builder
@@ -150,6 +150,7 @@ jobs:
           cd _Build
           "$image" --appimage-extract > /dev/null
           ./squashfs-root/AppRun --emulator --help > extracted-help.log
+          xvfb-run -a python3 ../tests/appimage-branding.py squashfs-root | tee branding-check.log
           # Hide development tools and host Python; exercise the bundled helpers after relocation.
           mkdir -p "$RUNNER_TEMP/kyty-base-tools"
           for command in bash cat chmod cp dirname env install ln mkdir mktemp mv readlink realpath rm touch true; do

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Demon's Souls (KyTy)
+Comment=Demon's Souls launcher with native FSR 4 upscaling
+Exec=kytyps5
+Icon=demons-souls-kyty
+StartupWMClass=demons-souls-kyty
+X-AppImage-Name=Demon's Souls (KyTy)
+Terminal=false
+Categories=Game;Emulator;

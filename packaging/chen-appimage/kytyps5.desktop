@@ -1,8 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=KytyPS5 (chenxiao07)
-Comment=Experimental PlayStation 5 emulator
-Exec=kytyps5
-Icon=kytyps5
-Terminal=false
-Categories=Game;Emulator;
