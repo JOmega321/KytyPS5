@@ -123,8 +123,9 @@ less sharp. The interface keeps the game output's size either way.
 "Aspect ratio" (16:9 by default, as on the PS5) renders the 3D wider for ultrawide displays: 21:9
 (3416x1440 at render height 1440) or 32:9, seeing more to the sides, not a stretched 16:9 picture. In
 play the HUD keeps its shape: health, magic, stamina and the equipment at the left edge, the souls at
-the right edge, the boss's health in the middle. The in-game menus, pre-rendered movies and loading
-screens are stretched to the width; the lock-on and enemy health bars stay on their targets. The
+the right edge, the boss's health in the middle. The intro, the movies, the title screen, the loading screens
+and the in-game menus are stretched to the width, unless "Movies and menus at 16:9 (black bars)" keeps them at
+16:9 between black bars; the lock-on and enemy health bars stay on their targets. The
 "Resolution" list follows the aspect ratio (2560x1080, 3440x1440, 3840x1600, 5120x2160 at 21:9), and
 "Render height" offers the heights whose 3D the game's render target memory holds (it was made for its own
 3840x2160): up to 1800 at 21:9 (4264x1800), 1512 at 32:9 (5376x1512). Larger ones drew the 3D red or broken, and
@@ -349,7 +350,8 @@ There are two levels of preparation, both specific to the graphics card and driv
      next packages.
    - **After a graphics driver update or a new graphics card it has to be done again**; the launcher
      asks again. It also asks after an update of the emulator that precompiles more: running it again
-     then compiles only what is new.
+     then compiles only what is new, unless that version translates the shaders differently (the launcher
+     then says the precompile compiles all of them once; until then the old ones stay in use).
    - To stop being asked: tick "Don't ask about precompiling again" (delete
      `no-precompile-prompt.txt` to be asked again).
 
@@ -429,7 +431,8 @@ files. The zip holds only the program files (the emulator, its DLLs, the scripts
 README, the licenses and the shader hints under `tools`). Your saves, shader caches, logs and settings
 are in files it does not have (`_SaveData`, `_PipelineCache`, `logs`, `game-path.txt`,
 `launcher-settings.json`, the `seeds-...` files), so they stay as they are. The launcher asks for a new
-precompile only when the new version needs one, and that run compiles only what is new. If you edited
+precompile only when the new version needs one, and that run compiles only what is new (or, when it says so,
+all of them once, for a newer translation). If you edited
 `launch.json` yourself, make the edit again in the new one. A copy of `_SaveData` before an update never
 hurts.
 
@@ -444,6 +447,9 @@ hurts.
   (up to 200). Where the CPU is at its limit and the game makes its sound too late, the sound is stretched a
   little to fill the gaps instead of cutting out (`-Set KYTY_AUDIO_STRETCH=0` turns that off).
 - It uses a lot of memory and video memory: on PCs with too little it may just exit.
+- NVIDIA's Low Latency Mode **Ultra** (NVIDIA Control Panel) makes the emulator's presents wait: uneven frame times
+  (RTSS and the emulator's panel disagree) and fewer frames (issue #129). Set Low Latency Mode to Off or On for
+  `kyty_emulator.exe` (Manage 3D settings > Program Settings).
 - The MEMORY_MANAGEMENT blue screen (0x1A, 0x41202) that PCs whose RAM ran full got after 10 minutes to an hour
   of play (issue #50, mostly 16 GB with a browser open) is fixed: Windows mishandles no-access pages of a mapped
   file when it pages them out, and the emulator now keeps such pages from reads with guard pages instead

@@ -75,6 +75,7 @@ const Table& English() {
 	    {"shaders.checking", "Precompiled shaders: checking…"},
 	    {"shaders.current", "Shaders precompiled for this graphics card"},
 	    {"shaders.outdated", "Shaders: precompile again (only what is new is compiled)"},
+	    {"shaders.outdatedAll", "Shaders: precompile again (this time all of them, once: a newer translation; the current ones work until then)"},
 	    {"shaders.none",
 	     "Shaders not precompiled yet: the game stutters the first time each effect appears"},
 	    {"shaders.unknown", "Precompiled shaders: not known (start the game once)"},
@@ -100,6 +101,7 @@ const Table& English() {
 	    {"summary.options", "Options"},
 	    {"summary.presentDirect", "direct presentation"},
 	    {"summary.vrrFlips", "VRR flips"},
+	    {"summary.wideBars", "16:9 movies and menus"},
 	    {"summary.antilag", "Anti-Lag"},
 	    {"summary.fps30", "30 fps lock"},
 	    {"summary.extra", "extra options"},
@@ -111,9 +113,12 @@ const Table& English() {
 	    {"resolution", "Resolution"},
 	    {"resolution.desc", "The window's size; in fullscreen the screen mode."},
 	    {"ratio", "Aspect ratio"},
-	    {"ratio.desc", "21:9 and 32:9 show more to the sides; the HUD keeps its shape, menus and "
-	                   "movies are stretched."},
+	    {"ratio.desc", "21:9 and 32:9 show more to the sides; the HUD keeps its shape."},
 	    {"ratio.169", "16:9 (PS5)"},
+	    {"widebars", "Movies and menus at 16:9 (black bars)"},
+	    {"widebars.desc", "With 21:9 or 32:9: the intro, the movies, the title screen, the loading screens and "
+	                      "the menus at 16:9 with black bars at the sides, not stretched (off: stretched to the "
+	                      "width)."},
 	    {"fullscreen", "Fullscreen"},
 	    {"aspect", "Keep the aspect ratio (black bars)"},
 	    {"aspect.desc", "In fullscreen on a screen of another shape."},
@@ -185,10 +190,13 @@ const Table& English() {
 	    {"dlssmodel.auto", "Automatic"},
 	    {"dlssmodel.k", "Transformer (preset K)"},
 	    {"dlssmodel.e", "CNN (preset E)"},
+	    {"dlssmodel.m", "Transformer 2 (preset M, DLSS 4.5)"},
+	    {"dlssmodel.l", "Transformer 2, sharpest (preset L, DLSS 4.5)"},
 	    {"dlssmodel.desc", "With DLSS: Automatic leaves the model to the DLSS version. Transformer "
 	                       "is the newer, sharper "
 	                       "model; CNN the older one, lighter on RTX 20 and 30 cards, where the "
-	                       "transformer model costs more."},
+	                       "transformer model costs more. M and L are DLSS 4.5's second transformer "
+	                       "models (L sharper, M faster), with a DLSS 4.5 runtime."},
 	    {"sharpen", "Sharpening"},
 	    {"sharpen.off", "Off"},
 	    {"sharpen.low", "Low"},
@@ -437,6 +445,7 @@ const Table& Chinese() {
 	    {"shaders.checking", "预编译着色器：检查中…"},
 	    {"shaders.current", "着色器已为本显卡预编译"},
 	    {"shaders.outdated", "着色器需要重新预编译（只编译新增部分）"},
+	    {"shaders.outdatedAll", "着色器需要重新预编译（这次会全部重新编译一遍：换成新的翻译方式；在此之前现有的仍可使用）"},
 	    {"shaders.none", "着色器尚未预编译：每种效果第一次出现时会卡顿"},
 	    {"shaders.unknown", "预编译着色器：状态未知（请先启动一次游戏）"},
 	    {"dlss.ok", "DLSS 可用（已找到 libkyty_dlss.so）"},
@@ -460,6 +469,7 @@ const Table& Chinese() {
 	    {"summary.options", "选项"},
 	    {"summary.presentDirect", "直接呈现"},
 	    {"summary.vrrFlips", "VRR 即时翻转"},
+	    {"summary.wideBars", "过场与菜单 16:9"},
 	    {"summary.antilag", "Anti-Lag"},
 	    {"summary.fps30", "锁定 30 帧"},
 	    {"summary.extra", "附加参数"},
@@ -471,8 +481,11 @@ const Table& Chinese() {
 	    {"resolution", "分辨率"},
 	    {"resolution.desc", "窗口大小；全屏时为屏幕分辨率。"},
 	    {"ratio", "画面比例"},
-	    {"ratio.desc", "21:9 与 32:9 能看到两侧更多画面；HUD 保持比例，菜单与过场动画会被拉伸。"},
+	    {"ratio.desc", "21:9 与 32:9 能看到两侧更多画面；HUD 保持比例。"},
 	    {"ratio.169", "16:9（PS5）"},
+	    {"widebars", "过场动画与菜单保持 16:9（黑边）"},
+	    {"widebars.desc", "选 21:9 或 32:9 时：片头、过场动画、标题画面、加载画面与菜单保持 16:9，两侧为黑边，"
+	                      "不拉伸（关闭时拉伸到整个宽度）。"},
 	    {"fullscreen", "全屏"},
 	    {"aspect", "保持画面比例（黑边）"},
 	    {"aspect.desc", "全屏且屏幕比例不同时生效。"},
@@ -530,6 +543,8 @@ const Table& Chinese() {
 	    {"dlssmodel.auto", "自动"},
 	    {"dlssmodel.k", "Transformer（预设 K）"},
 	    {"dlssmodel.e", "CNN（预设 E）"},
+	    {"dlssmodel.m", "Transformer 2（预设 M，DLSS 4.5）"},
+	    {"dlssmodel.l", "Transformer 2，最清晰（预设 L，DLSS 4.5）"},
 	    {"dlssmodel.desc", "使用 DLSS 时生效。自动：由 DLSS "
 	                       "版本决定模型。Transformer：更新、更清晰的模型；CNN：旧模型，在 RTX 20 "
 	                       "和 30 系显卡上更轻（Transformer 模型在这些显卡上开销更大）。"},
@@ -759,6 +774,7 @@ const Table& Portuguese() {
 	    {"shaders.checking", "Shaders pré-compilados: verificando…"},
 	    {"shaders.current", "Shaders pré-compilados para esta placa de vídeo"},
 	    {"shaders.outdated", "Shaders: pré-compile de novo (só o que é novo é compilado)"},
+	    {"shaders.outdatedAll", "Shaders: pré-compile de novo (desta vez todos, uma vez: uma tradução mais nova; os atuais funcionam até lá)"},
 	    {"shaders.none", "Shaders ainda não pré-compilados: o jogo engasga na primeira vez que "
 	                     "cada efeito aparece"},
 	    {"shaders.unknown", "Shaders pré-compilados: desconhecido (inicie o jogo uma vez)"},
@@ -784,6 +800,7 @@ const Table& Portuguese() {
 	    {"summary.options", "Opções"},
 	    {"summary.presentDirect", "apresentação direta"},
 	    {"summary.vrrFlips", "trocas VRR"},
+	    {"summary.wideBars", "vídeos e menus em 16:9"},
 	    {"summary.antilag", "Anti-Lag"},
 	    {"summary.fps30", "trava em 30 fps"},
 	    {"summary.extra", "opções extras"},
@@ -795,9 +812,12 @@ const Table& Portuguese() {
 	    {"resolution", "Resolução"},
 	    {"resolution.desc", "O tamanho da janela; em tela cheia, o modo da tela."},
 	    {"ratio", "Proporção"},
-	    {"ratio.desc",
-	     "21:9 e 32:9 mostram mais dos lados; o HUD mantém a forma, menus e vídeos são esticados."},
+	    {"ratio.desc", "21:9 e 32:9 mostram mais dos lados; o HUD mantém a forma."},
 	    {"ratio.169", "16:9 (PS5)"},
+	    {"widebars", "Vídeos e menus em 16:9 (barras pretas)"},
+	    {"widebars.desc", "Com 21:9 ou 32:9: a abertura, os vídeos, a tela de título, as telas de carregamento "
+	                      "e os menus em 16:9 com barras pretas nos lados, sem esticar (desligado: esticados na "
+	                      "largura)."},
 	    {"fullscreen", "Tela cheia"},
 	    {"aspect", "Manter a proporção (barras pretas)"},
 	    {"aspect.desc", "Em tela cheia numa tela de outro formato."},
@@ -870,6 +890,8 @@ const Table& Portuguese() {
 	    {"dlssmodel.auto", "Automático"},
 	    {"dlssmodel.k", "Transformer (preset K)"},
 	    {"dlssmodel.e", "CNN (preset E)"},
+	    {"dlssmodel.m", "Transformer 2 (preset M, DLSS 4.5)"},
+	    {"dlssmodel.l", "Transformer 2, mais nítido (preset L, DLSS 4.5)"},
 	    {"dlssmodel.desc",
 	     "Com DLSS: Automático deixa o modelo para a versão do DLSS. Transformer é o modelo mais "
 	     "novo e "

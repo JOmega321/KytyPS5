@@ -219,12 +219,14 @@ Launch Commands::Play(const GameInfo& game, bool direct) const {
 	    {"--console-language", std::to_string(S().Int("language"))}};
 	const auto ratio = S().Str("ratio");
 	const bool wide  = ratio == "21:9" || ratio == "32:9";
+	// (KYTY_PRESENT_ASPECT=fit: the 16:9 picture between black bars on a screen of another shape;
+	// with 21:9 or 32:9 the frames without the 3D view, the movies, the title and the loading
+	// screens, which fill the screen stretched otherwise: "wide_bars", in a window too.)
 	if (S().Bool("fullscreen")) {
 		options.push_back({"--fullscreen"});
-		// (Keeping 16:9 with 21:9 or 32:9 would keep movies and menus at 16:9: the wider ratios
-		// fill the screen.)
 		if (S().Bool("aspect") && !wide) Put(set, "KYTY_PRESENT_ASPECT", "fit");
 	}
+	if (wide && S().Bool("wide_bars")) Put(set, "KYTY_PRESENT_ASPECT", "fit");
 	if (S().Bool("hdr")) options.push_back({"--hdr"});
 	// The game's frames up to 120 fps: a 120 Hz vblank (run_ds.sh gives the game its least step
 	// above 60). The 30 fps lock (KYTY_FLIP_RATE=1 below) keeps 60.

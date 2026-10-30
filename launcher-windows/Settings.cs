@@ -38,6 +38,8 @@ sealed class Settings {
 		new object[] {"dlss_sharpness", ""}, new object[] {"fsr_sharpness", ""},
 		// (Game page: the audio output the game is told, "" a TV.)
 		new object[] {"audio_output", ""},
+		// (Display page: with 21:9 or 32:9 the movies, the title and the loading screens at 16:9 between black bars.)
+		new object[] {"wide_bars", false},
 	};
 
 	readonly string path;

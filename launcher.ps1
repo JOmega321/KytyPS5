@@ -350,11 +350,13 @@ function Get-PlayCommand {
 	$size = $settings.resolution -split 'x'
 	$arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$root\run-windows.ps1`"", '-Prompt', '-Follow',
 		'-Width', $size[0], '-Height', $size[1], '-Language', $settings.language)
-	# (-AspectFit with 21:9 or 32:9 would keep movies and menus at 16:9: the launcher's wider ratios fill the screen.)
+	# (-AspectFit: the 16:9 picture between black bars on a screen of another shape; with 21:9 or 32:9 the movies, the title
+	# and the loading screens, KytyLauncher.exe's "wide_bars".)
 	if ($settings.fullscreen) {
 		$arguments += '-Fullscreen'
 		if ($settings.aspect -and $settings.ratio -notin '21:9', '32:9') { $arguments += '-AspectFit' }
 	}
+	if ($settings.wide_bars -and $settings.ratio -in '21:9', '32:9') { $arguments += '-AspectFit' }
 	if (!$settings.redzone) { $arguments += '-NoRedZone' }
 	# (KytyLauncher.exe's 30 fps lock, Experimental: KYTY_FLIP_RATE=1 below, at 60 Hz.)
 	if ($settings.fps120 -and !$settings.fps30) { $arguments += '-Fps120' }

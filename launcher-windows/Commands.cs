@@ -74,11 +74,14 @@ sealed class Commands {
 		arguments.AddRange(new[] { "-Follow", "-Width", size[0], "-Height", size.Length > 1 ? size[1] : "1080", "-Language", Number(S.Int("language")) });
 		var ratio = S.Str("ratio");
 		var wide = ratio == "21:9" || ratio == "32:9";
-		// (-AspectFit with 21:9 or 32:9 would keep movies and menus at 16:9: the launcher's wider ratios fill the screen.)
+		// (-AspectFit: the 16:9 picture between black bars on a screen of another shape; with 21:9 or 32:9 the frames without
+		// the 3D view, the movies, the title and the loading screens, which fill the screen stretched otherwise: "wide_bars",
+		// in a window too.)
 		if (S.Bool("fullscreen")) {
 			arguments.Add("-Fullscreen");
 			if (S.Bool("aspect") && !wide) arguments.Add("-AspectFit");
 		}
+		if (wide && S.Bool("wide_bars")) arguments.Add("-AspectFit");
 		if (!S.Bool("redzone")) arguments.Add("-NoRedZone");
 		// (The 30 fps lock, Experimental: KYTY_FLIP_RATE=1 below, at 60 Hz: up to 120 fps it would be 60.)
 		if (S.Bool("fps120") && !S.Bool("fps30")) arguments.Add("-Fps120");

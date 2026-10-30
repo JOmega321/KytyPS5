@@ -25,6 +25,7 @@ can ask y/N and for the sudo password.
 | --- | --- | --- |
 | Display | Resolution | `--screen-width`, `--screen-height` |
 | | Aspect ratio 21:9, 32:9 | `KYTY_RENDER_ASPECT` |
+| | Movies and menus at 16:9 (black bars), with 21:9 or 32:9 | `KYTY_PRESENT_ASPECT=fit` |
 | | Fullscreen, keep the aspect ratio | `--fullscreen`, `KYTY_PRESENT_ASPECT=fit` |
 | | HDR | `--hdr` |
 | | Up to 120 fps | `KYTY_VBLANK=120` (run_ds.sh adds `gameMinDeltaTime`) |
