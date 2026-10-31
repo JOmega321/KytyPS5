@@ -58,13 +58,15 @@ const std::vector<std::string>& Resolutions(const std::string& ratio) {
 }
 
 // The height Demon's Souls renders its 3D at; below 720 with the 1080p output only (DLSS's lower
-// modes there, the game's TAA down to 540).
-constexpr int RenderHeights[] {2160, 1800, 1620, 1512, 1440, 1296, 1152, 1080, 900, 720};
+// modes there, the game's TAA down to 540). The upscalers' usual shares among them (issue #129):
+// Ultra Quality 77% (1664 of 4K, 832 of 1080p), Quality 66.7%, Balanced 58% (1256), Performance 50%,
+// Ultra Performance 33%.
+constexpr int RenderHeights[] {2160, 1800, 1664, 1620, 1512, 1440, 1296, 1256, 1152, 1080, 900, 832, 720};
 constexpr int LowRenderHeights[] {630, 540, 360};
-// The 1440p output's (DLSS or FSR 3, KYTY_OUTPUT_HEIGHT): DLAA, Quality, Balanced 840, Performance
-// 720, Ultra Performance 480 (its third; the emulator raises a height between the third and the
-// half to the half).
-constexpr int Output1440Heights[] {1440, 1152, 1080, 960, 840, 720, 480};
+// The 1440p output's (DLSS or FSR 3, KYTY_OUTPUT_HEIGHT): DLAA, Ultra Quality 1104, Quality 960,
+// Balanced 840, Performance 720, Ultra Performance 480 (its third; the emulator raises a height
+// between the third and the half to the half).
+constexpr int Output1440Heights[] {1440, 1152, 1104, 1080, 960, 840, 720, 480};
 
 int HeightOf(const std::string& resolution) {
 	const auto x = resolution.find('x');
@@ -996,11 +998,13 @@ int LauncherWindow::SelectedRender() const {
 }
 
 // The DLSS mode a render height runs in: the emulator picks it from the height's share of the
-// game's output (95% DLAA, 62% Quality, 55% Balanced, 45% Performance, less Ultra Performance).
+// game's output (95% DLAA, 62% Quality, 55% Balanced, 45% Performance, less Ultra Performance);
+// from 72% named Ultra Quality (77% the usual share), DLSS's Quality mode with more lines.
 std::string LauncherWindow::SuperResolutionMode(int height) const {
 	const double share  = static_cast<double>(height) / OutputLines();
 	const char*  native = commands_.FsrUpscaler() ? "fsr.native" : "dlss.dlaa";
 	return T(share >= 0.95   ? native
+	         : share >= 0.72 ? "dlss.ultraquality"
 	         : share >= 0.62 ? "dlss.quality"
 	         : share >= 0.55 ? "dlss.balanced"
 	         : share >= 0.45 ? "dlss.performance"

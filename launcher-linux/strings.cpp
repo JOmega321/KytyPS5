@@ -207,6 +207,7 @@ const Table& English() {
 	                     "looks softer. FSR 3 is Medium by default, its own sharpening. Each upscaler "
 	                     "keeps its own setting. Higher levels can show halos on edges."},
 	    {"dlss.dlaa", "DLAA"},
+	    {"dlss.ultraquality", "Ultra Quality"},
 	    {"dlss.quality", "Quality"},
 	    {"dlss.balanced", "Balanced"},
 	    {"dlss.performance", "Performance"},
@@ -557,6 +558,7 @@ const Table& Chinese() {
 	                     "会锐化画面，DLSS 不会，所以细节看起来偏软。FSR 3 默认为「中」，即它自带的锐化。"
 	                     "两种超分各自保存设置。等级越高，边缘越可能出现光晕。"},
 	    {"dlss.dlaa", "DLAA"},
+	    {"dlss.ultraquality", "超级质量"},
 	    {"dlss.quality", "质量"},
 	    {"dlss.balanced", "平衡"},
 	    {"dlss.performance", "性能"},
@@ -907,6 +909,7 @@ const Table& Portuguese() {
 	     "mais suaves. No FSR 3 vem em Média, a nitidez dele mesmo. Cada upscaler guarda a sua. Níveis "
 	     "mais altos podem mostrar halos nas bordas."},
 	    {"dlss.dlaa", "DLAA"},
+	    {"dlss.ultraquality", "Ultraqualidade"},
 	    {"dlss.quality", "Qualidade"},
 	    {"dlss.balanced", "Equilibrado"},
 	    {"dlss.performance", "Desempenho"},

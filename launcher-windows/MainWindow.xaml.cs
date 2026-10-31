@@ -36,14 +36,16 @@ partial class MainWindow : Window {
 		{ "21:9", new[] { "2560x1080", "3440x1440", "3840x1600", "5120x2160" } },
 		{ "32:9", new[] { "3840x1080", "5120x1440", "7680x2160" } },
 	};
-	// The height Demon's Souls renders its 3D at (run-windows.ps1 -RenderHeight); its output and UI stay 3840x2160.
-	static readonly int[] RenderHeights = { 2160, 1800, 1620, 1512, 1440, 1296, 1152, 1080, 900, 720 };
+	// The height Demon's Souls renders its 3D at (run-windows.ps1 -RenderHeight); its output and UI stay 3840x2160. The
+	// upscalers' usual shares among them (issue #129): Ultra Quality 77% (1664 of 4K, 832 of 1080p), Quality 66.7%
+	// (1440), Balanced 58% (1256), Performance 50% (1080), Ultra Performance 33% (720).
+	static readonly int[] RenderHeights = { 2160, 1800, 1664, 1620, 1512, 1440, 1296, 1256, 1152, 1080, 900, 832, 720 };
 	// Below 720 with the 1080p output only (issue #129): DLSS's Balanced, Performance and Ultra Performance there; the
 	// game's TAA down to 540 (from 360 its picture is too soft).
 	static readonly int[] LowRenderHeights = { 630, 540, 360 };
-	// The 1440p output's (DLSS or FSR 3, PR #165): DLAA, Quality, Balanced 840, Performance 720, Ultra Performance 480 (its
-	// third; the emulator raises a height between the third and the half to the half).
-	static readonly int[] Output1440Heights = { 1440, 1152, 1080, 960, 840, 720, 480 };
+	// The 1440p output's (DLSS or FSR 3, PR #165): DLAA, Ultra Quality 1104, Quality 960, Balanced 840, Performance 720,
+	// Ultra Performance 480 (its third; the emulator raises a height between the third and the half to the half).
+	static readonly int[] Output1440Heights = { 1440, 1152, 1104, 1080, 960, 840, 720, 480 };
 
 	// (--screenshot pictures: no game art, another path shown.)
 	public static bool ScreenshotNoArt;
@@ -666,12 +668,13 @@ partial class MainWindow : Window {
 	}
 
 	// The DLSS mode a render height runs in: the emulator picks it from the height's share of the game's output
-	// (frame-gen.cpp: 95% DLAA, 62% Quality, 55% Balanced, 45% Performance, less Ultra Performance).
+	// (frame-gen.cpp: 95% DLAA, 62% Quality, 55% Balanced, 45% Performance, less Ultra Performance). From 72% it is named
+	// Ultra Quality (77% the usual share), DLSS's Quality mode with more lines.
 	string SuperResolutionMode(int height) {
 		var share = (double)height / OutputLines;
 		// (FSR 3 names the same modes; at the output's own size it is FSR's native anti-aliasing.)
 		var native = upscaler != null && Value(upscaler) as string == "fsr" ? "fsr.native" : "dlss.dlaa";
-		return T(share >= 0.95 ? native : share >= 0.62 ? "dlss.quality" : share >= 0.55 ? "dlss.balanced" : share >= 0.45 ? "dlss.performance" : "dlss.ultra");
+		return T(share >= 0.95 ? native : share >= 0.72 ? "dlss.ultraquality" : share >= 0.62 ? "dlss.quality" : share >= 0.55 ? "dlss.balanced" : share >= 0.45 ? "dlss.performance" : "dlss.ultra");
 	}
 
 	// The highest render height whose 3D at the ratio fits the game's render target memory, made for 3840x2160: no more of
