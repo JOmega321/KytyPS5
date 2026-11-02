@@ -497,9 +497,14 @@ Interpolator& TheInterpolator() {
 
 bool Upscale(GraphicContext& graphics, vk::CommandBuffer command, const FrameGen::UpscaleInputs& inputs) {
 	if (!UpscalerRequested()) return false;
-    const char* selected = std::getenv("KYTY_UPSCALER");
-    if (selected && std::string_view(selected) == "fsr4" && Fsr4Upscale(graphics, command, inputs)) return true;
-    return TheUpscaler().Record(graphics, command, inputs);
+	const char* selected = std::getenv("KYTY_UPSCALER");
+	if (selected && std::string_view(selected) == "fsr4") {
+		// Preserve the native INT8/FP8 replay and its explicit FSR 3 fallback.
+		return Fsr4Upscale(graphics, command, inputs) || TheUpscaler().Record(graphics, command, inputs);
+	}
+	// Chen's SDK runtime where supported (Windows), otherwise the built-in FSR 3 path.
+	return FrameGen::UpscaleWithAmdRuntime(graphics, command, inputs) ||
+	       TheUpscaler().Record(graphics, command, inputs);
 }
 
 bool Interpolate(GraphicContext& graphics, vk::CommandBuffer command, const InterpolationInputs& inputs,

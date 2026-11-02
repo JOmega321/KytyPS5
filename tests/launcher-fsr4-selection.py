@@ -28,7 +28,7 @@ def main():
         ("old-toggle-on", {"upscaler": "fsr4", "fsr4_precision": "fp8",
                            "fsr4_radv_matrix_conversions": True}, "fp8", True),
         ("int8", {"upscaler": "fsr4", "fsr4_precision": "int8",
-                  "fsr4_radv_matrix_conversions": True}, "int8", False),
+                  "fsr4_radv_matrix_conversions": True, "skip_logos": True}, "int8", False),
         ("default-int8", {"upscaler": "fsr4"}, "int8", False),
         ("fsr3", {"upscaler": "fsr", "fsr4_precision": "fp8"}, None, False),
         ("off", {"upscaler": "off", "fsr4_precision": "fp8"}, None, False),
@@ -47,6 +47,7 @@ def main():
             run = subprocess.run([image, "--dry-run"], env=env, check=True,
                                  capture_output=True, text=True, timeout=60)
             variables = exports(run.stdout)
+            assert "KYTY_SKIP_LOGOS" not in variables, (name, run.stdout)
             assert variables.get("KYTY_FSR4_PRECISION") == precision, (name, run.stdout)
             assert (variables.get("radv_cooperative_matrix2_nv") == "true") == matrix, (name, run.stdout)
             if not matrix:
