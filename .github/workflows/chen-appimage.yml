@@ -20,14 +20,15 @@ jobs:
       - name: Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang lld ccache ninja-build cmake spirv-tools python3 python3-full glslang-tools patchelf desktop-file-utils xvfb xauth x11-utils fonts-dejavu-core libvulkan1 libgl1-mesa-dev libx11-dev libxcursor-dev libxext-dev libxfixes-dev libxi-dev libxrandr-dev libxss-dev libxkbcommon-dev libasound2-dev libpulse-dev libudev-dev libdbus-1-dev libwayland-dev wayland-protocols
+          sudo apt-get install -y --no-install-recommends clang-18 lld-18 llvm-18 ccache ninja-build cmake spirv-tools python3 python3-full glslang-tools patchelf desktop-file-utils xvfb xauth x11-utils fonts-dejavu-core libvulkan1 libgl1-mesa-dev libx11-dev libxcursor-dev libxext-dev libxfixes-dev libxi-dev libxrandr-dev libxss-dev libxkbcommon-dev libasound2-dev libpulse-dev libudev-dev libdbus-1-dev libwayland-dev wayland-protocols
       - name: Test asset-builder process handling
         run: |
-          clang++ -std=c++20 -pthread -Ilauncher-linux launcher-linux/asset-builder.cpp tests/launcher-asset-builder.cpp -o /tmp/test-asset-builder
+          clang++-18 -std=c++20 -pthread -Ilauncher-linux launcher-linux/asset-builder.cpp tests/launcher-asset-builder.cpp -o /tmp/test-asset-builder
           /tmp/test-asset-builder
           bash -n tools/fsr412-vk/build_assets.sh packaging/chen-appimage/AppRun
           python3 tests/fsr412-vk-extract.py
           python3 tests/fsr412-host-audit.py
+          python3 tests/fsr412-benchmark.py
           python3 tests/appimage-name.py
           python3 -m py_compile tools/fsr412-vk/recover_assets.py packaging/chen-appimage/package.py packaging/chen-appimage/emit_screenshot.py
       - name: Choose dated AppImage filename
@@ -40,15 +41,26 @@ jobs:
           path: ~/.cache/ccache
           key: native-clang-ubuntu24-${{ github.sha }}
           restore-keys: native-clang-ubuntu24-
+      - name: Verify Linux PGO compatibility
+        run: |
+          mkdir -p _Build
+          llvm-profdata-18 show tools/pgo/kyty-linux.profdata | tee _Build/pgo-profile.log
+          sha256sum tools/pgo/kyty-linux.profdata >> _Build/pgo-profile.log
+          printf 'int main() { return 0; }\n' > _Build/pgo-probe.cpp
+          clang++-18 -O3 -march=x86-64-v3 -flto=thin -fuse-ld=lld-18 \
+            -fprofile-instr-use="$PWD/tools/pgo/kyty-linux.profdata" \
+            -Wno-profile-instr-unprofiled _Build/pgo-probe.cpp -o _Build/pgo-probe
+          _Build/pgo-probe
       - name: Configure and build native programs
         run: |
           ccache --max-size 1500M
           cmake -S . -B _Build/appimage -G Ninja -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18 \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DKYTY_BUILD_LAUNCHER=OFF \
             -DCMAKE_C_FLAGS_RELEASE='-O3 -DNDEBUG -march=x86-64-v3' \
             -DCMAKE_CXX_FLAGS_RELEASE='-O3 -DNDEBUG -march=x86-64-v3 -flto=thin' \
-            -DCMAKE_EXE_LINKER_FLAGS='-fuse-ld=lld -flto=thin' \
+            -DCMAKE_EXE_LINKER_FLAGS='-fuse-ld=lld-18 -flto=thin' \
+            -DKYTY_PGO_USE="$PWD/tools/pgo/kyty-linux.profdata" \
             -DKYTY_BUILD_ORIGIN=Fork -DKYTY_BUILD_REPOSITORY="$GITHUB_REPOSITORY"
           cmake --build _Build/appimage --target kyty_emulator kyty_launcher kyty_shader_precompile --parallel 4
           _Build/appimage/kyty_emulator --help > _Build/native-help.log
@@ -61,7 +73,7 @@ jobs:
         run: |
           git rev-parse HEAD > _Build/appimage/native-source.txt
           git submodule status --recursive > _Build/appimage/native-dependencies.txt
-          clang --version > _Build/appimage/native-toolchain.txt
+          clang-18 --version > _Build/appimage/native-toolchain.txt
           ldd --version >> _Build/appimage/native-toolchain.txt
           dpkg-query -W >> _Build/appimage/native-toolchain.txt
           find _Build/appimage/externals -name '*.zip' -exec sha256sum {} + > _Build/appimage/native-downloads.sha256
@@ -98,6 +110,19 @@ jobs:
           mkdir -p _Build/output
           ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 _Build/appimagetool --runtime-file _Build/runtime-x86_64 _Build/KytyPS5.AppDir "_Build/output/$APPIMAGE_NAME"
           cp _Build/build-name.json _Build/output/BUILD-INFO.json
+          python3 - <<'PYINFO'
+          import hashlib, json, subprocess
+          from pathlib import Path
+          path = Path('_Build/output/BUILD-INFO.json')
+          info = json.loads(path.read_text())
+          info['native_build'] = {
+              'compiler': subprocess.check_output(['clang-18', '--version'], text=True).splitlines()[0],
+              'cpu_baseline': 'x86-64-v3', 'optimization': 'O3', 'lto': 'thin',
+              'pgo_profile': 'tools/pgo/kyty-linux.profdata',
+              'pgo_sha256': hashlib.sha256(Path('tools/pgo/kyty-linux.profdata').read_bytes()).hexdigest(),
+          }
+          path.write_text(json.dumps(info, indent=2) + '\n')
+          PYINFO
           cd _Build/output
           sha256sum *.AppImage > SHA256SUMS
       - name: Validate final AppImage
