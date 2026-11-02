@@ -127,6 +127,10 @@ jobs:
           t2160_m0 1280x720 2560x1440
           t2160_m1 1280x720 3840x2160
           PACKED
+          # Reuse the constant ring and fenced timestamp pool, including skipped RCAS.
+          FSR412_BENCHMARK=1 timeout 360 _Build/native-test/native-frame-test _Build/all-assets _Build/profile.raw 320x180 640x360 12 r11g11b10 no-sharpen int8 > _Build/profile.log 2>&1
+          python3 tools/fsr412-vk/summarize-benchmark.py _Build/profile.log --warmup 2
+          python3 tests/fsr412-benchmark.py
           cat _Build/native-t*.log _Build/packed-t*.log > _Build/native-frame-test.log
       - name: Package native frame test without AMD assets
         run: |

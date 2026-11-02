@@ -21,6 +21,8 @@
 namespace Fsr411 {
 
 constexpr uint32_t kFramesInFlight = 8;
+constexpr uint32_t kProfilePassCount = 29;
+const char* ProfilePassName(uint32_t index);
 
 struct Image {
     VkImage image = VK_NULL_HANDLE;
@@ -52,6 +54,12 @@ struct Frame {
     bool sharpen = false;
     bool reset = false;
     bool auto_exposure = true;
+    /// Optional diagnostic timestamps: 2 queries per pass, including skipped passes.
+    /// Caller must check the recording queue's timestampValidBits, reset this range
+    /// before Record, and wait for submission completion before reading/reusing or
+    /// destroying it. No query lifetime is inferred from the constant-buffer ring.
+    VkQueryPool profile_pool = VK_NULL_HANDLE;
+    uint32_t profile_first_query = 0;
 };
 
 class Upscaler {
@@ -63,6 +71,9 @@ public:
     ~Upscaler();
 
     /// Records one upscale; false with Error() set when it cannot (assets, device, sizes).
+    /// Calls on one Upscaler must be externally serialized (including Describe/Error).
+    /// Separate instances own separate descriptor storage; GPU resources retain the
+    /// existing frames-in-flight and submission-order requirements above.
     bool Record(const Frame& frame);
     [[nodiscard]] const std::string& Error() const noexcept;
     /// The variant, asset set and sizes in use, for logs ("FP8 t2160_m0 output 3840x2160").

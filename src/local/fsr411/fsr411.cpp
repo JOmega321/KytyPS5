@@ -80,6 +80,7 @@ constexpr const char* kPasses[] = {
     "pass11_post", "pass12",      "pass12_post", "postpass",    "rcas",
 };
 constexpr uint32_t kPassCount = sizeof(kPasses) / sizeof(kPasses[0]);
+static_assert(kPassCount == kProfilePassCount);
 /// Tensor level (1/2^level of the aligned output) a model pass runs at, and of its _post pass.
 constexpr uint32_t kRunLevel[13] = {1, 1, 1, 2, 2, 2, 3, 3, 3, 3, 2, 2, 1};
 constexpr uint32_t kPostLevel[13] = {1, 1, 1, 2, 2, 2, 3, 3, 3, 2, 2, 1, 1};
@@ -302,7 +303,18 @@ struct Upscaler::Impl {
     bool ready = false;
     bool uploaded = false;
 
+    enum class Resource {
+        Color, Motion, Depth, History, Reprojected, Recurrent, ExposureInput, Exposure,
+        SpdAtomic, SpdMip5, MlsrOutput, RcasInput, Output, Scratch, Initializer,
+        MlsrConstants, SpdConstants, RcasConstants, TensorConstants
+    };
     struct Pass {
+        // Sized once before storing pointers; never resized during Record. Push descriptors
+        // copy this host data into the command buffer, so it needs no GPU-frame ring.
+        std::vector<Resource> recipes;
+        std::vector<VkWriteDescriptorSet> writes;
+        std::vector<VkDescriptorImageInfo> images;
+        std::vector<VkDescriptorBufferInfo> buffers;
         Reflection refl;
         VkDescriptorSetLayout set_layout = VK_NULL_HANDLE;
         VkPipelineLayout layout = VK_NULL_HANDLE;
@@ -327,14 +339,6 @@ struct Upscaler::Impl {
     std::vector<uint8_t> initializer_data;
     uint64_t frame_index = 0;
     float previous_pre_exposure = 0.0f;
-    // BB_FSR4_PROFILE=1: GPU time per pass, read when a ring slot is reused, printed every 300 frames.
-    VkQueryPool profile_pool = VK_NULL_HANDLE;
-    float period_ns = 1.0f;
-    std::array<uint32_t, kFramesInFlight> profile_count{};
-    std::array<std::array<uint8_t, kPassCount>, kFramesInFlight> profile_pass{};
-    std::array<double, kPassCount> profile_ms{};
-    uint64_t profile_frames = 0;
-
     Impl(VkPhysicalDevice p, VkDevice d, std::string dir_, Features features)
         : physical{p}, device{d}, dir{std::move(dir_)} {
         // FP8 when the device runs it and its sets were built (on RDNA4: tools/fsr4cap records
@@ -355,51 +359,12 @@ struct Upscaler::Impl {
         ubo_align = std::max<VkDeviceSize>(256, props.limits.minUniformBufferOffsetAlignment);
         push_descriptors = reinterpret_cast<PFN_vkCmdPushDescriptorSetKHR>(
             vkGetDeviceProcAddr(device, "vkCmdPushDescriptorSetKHR"));
-        period_ns = props.limits.timestampPeriod;
-        const char* profile = std::getenv("BB_FSR4_PROFILE");
-        if (false && profile) {
-            VkQueryPoolCreateInfo qci{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
-            qci.queryType = VK_QUERY_TYPE_TIMESTAMP;
-            qci.queryCount = kFramesInFlight * (kPassCount + 1);
-            if (vkCreateQueryPool(device, &qci, nullptr, &profile_pool) != VK_SUCCESS) {
-                profile_pool = VK_NULL_HANDLE;
-            }
-        }
+        // The imported BB_FSR4_PROFILE path was disabled at introduction. Profiling
+        // now uses caller-owned queries with explicit fence completion (standalone
+        // test), rather than assuming that a CPU frame-ring slot is GPU-complete.
     }
 
-    void CollectProfile(uint32_t slot) {
-        const uint32_t count = profile_count[slot];
-        if (!profile_pool || !count) {
-            return;
-        }
-        profile_count[slot] = 0;
-        std::array<uint64_t, kPassCount + 1> ts{};
-        if (vkGetQueryPoolResults(device, profile_pool, slot * (kPassCount + 1), count + 1,
-                                  sizeof(ts), ts.data(), 8, VK_QUERY_RESULT_64_BIT) != VK_SUCCESS) {
-            return;
-        }
-        for (uint32_t i = 0; i < count; ++i) {
-            profile_ms[profile_pass[slot][i]] += double(ts[i + 1] - ts[i]) * period_ns * 1e-6;
-        }
-        if (++profile_frames % 300) {
-            return;
-        }
-        double total = 0.0;
-        for (double ms : profile_ms) total += ms;
-        std::printf("FSR 4.1.1 profile: %.3f ms/frame\n", total / 300.0);
-        for (uint32_t p = 0; p < kPassCount; ++p) {
-            if (profile_ms[p] > 0.0) {
-                std::printf("  %6.3f ms/frame  %s\n", profile_ms[p] / 300.0, kPasses[p]);
-            }
-            profile_ms[p] = 0.0;
-        }
-        std::fflush(stdout);
-    }
-
-    ~Impl() {
-        Destroy();
-        if (profile_pool) vkDestroyQueryPool(device, profile_pool, nullptr);
-    }
+    ~Impl() { Destroy(); }
 
     uint32_t MemoryType(uint32_t bits, VkMemoryPropertyFlags flags) const {
         for (uint32_t i = 0; i < memory.memoryTypeCount; ++i) {
@@ -504,7 +469,6 @@ struct Upscaler::Impl {
             p = {};
         }
         if (linear_clamp) vkDestroySampler(device, linear_clamp, nullptr);
-        profile_count = {};
         linear_clamp = VK_NULL_HANDLE;
         for (Img* img : {&recurrent, &history, &reprojected, &mlsr_output, &exposure,
                          &exposure_identity, &spd_atomic, &spd_mip5}) {
@@ -531,6 +495,49 @@ struct Upscaler::Impl {
         if (!Reflect(words, p.refl, error)) {
             error = path + ": " + error;
             return false;
+        }
+        for (const Binding& b : p.refl.bindings) {
+            if (b.type == VK_DESCRIPTOR_TYPE_SAMPLER) continue; // immutable
+            if (b.name == "r_input_color") p.recipes.push_back(Resource::Color);
+            else if (b.name == "r_velocity") p.recipes.push_back(Resource::Motion);
+            else if (b.name == "r_depth") p.recipes.push_back(Resource::Depth);
+            else if (b.name == "r_history_color" || b.name == "rw_history_color") p.recipes.push_back(Resource::History);
+            else if (b.name == "r_reprojected_color" || b.name == "rw_reprojected_color") p.recipes.push_back(Resource::Reprojected);
+            else if (b.name == "r_recurrent_0" || b.name == "rw_recurrent_0") p.recipes.push_back(Resource::Recurrent);
+            else if (b.name == "r_auto_exposure_texture") p.recipes.push_back(Resource::ExposureInput);
+            else if (b.name == "rw_auto_exposure_texture") p.recipes.push_back(Resource::Exposure);
+            else if (b.name == "rw_spd_global_atomic") p.recipes.push_back(Resource::SpdAtomic);
+            else if (b.name == "rw_autoexp_mip_5") p.recipes.push_back(Resource::SpdMip5);
+            else if (b.name == "rw_mlsr_output_color") p.recipes.push_back(Resource::MlsrOutput);
+            else if (b.name == "r_rcas_input") p.recipes.push_back(Resource::RcasInput);
+            else if (b.name == "rw_rcas_output") p.recipes.push_back(Resource::Output);
+            else if (b.name == "ScratchBuffer") p.recipes.push_back(Resource::Scratch);
+            else if (b.name == "InitializerBuffer") p.recipes.push_back(Resource::Initializer);
+            else if (b.name == "MLSR_Optimized_Constants") p.recipes.push_back(Resource::MlsrConstants);
+            else if (b.name == "AutoExposureSPDConstants") p.recipes.push_back(Resource::SpdConstants);
+            else if (b.name == "cbRCAS") p.recipes.push_back(Resource::RcasConstants);
+            else if (b.name == "CsTensorSizes") p.recipes.push_back(Resource::TensorConstants);
+            else {
+                error = path + ": unknown resource " + b.name;
+                return false; // Reject before any frame commands are recorded.
+            }
+        }
+        p.writes.resize(p.recipes.size());
+        p.images.resize(p.recipes.size());
+        p.buffers.resize(p.recipes.size());
+        size_t descriptor = 0;
+        for (const Binding& b : p.refl.bindings) {
+            if (b.type == VK_DESCRIPTOR_TYPE_SAMPLER) continue;
+            auto& w = p.writes[descriptor];
+            w.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            w.dstBinding = b.binding;
+            w.descriptorCount = 1;
+            w.descriptorType = b.type;
+            if (b.type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER || b.type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+                w.pBufferInfo = &p.buffers[descriptor];
+            else
+                w.pImageInfo = &p.images[descriptor];
+            ++descriptor;
         }
         std::vector<VkDescriptorSetLayoutBinding> bindings;
         for (const Binding& b : p.refl.bindings) {
@@ -741,13 +748,6 @@ struct Upscaler::Impl {
         // Constant buffers of this frame: MLSR, SPD, RCAS.
         const uint32_t ring = uint32_t(frame_index++ % kFramesInFlight);
         const VkDeviceSize slot = ring * 4 * ubo_align;
-        CollectProfile(ring);
-        const uint32_t query_base = ring * (kPassCount + 1);
-        uint32_t profiled = 0;
-        if (profile_pool) {
-            vkCmdResetQueryPool(cmd, profile_pool, query_base, kPassCount + 1);
-            vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, profile_pool, query_base);
-        }
         VkMemoryBarrier constants{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
         constants.srcAccessMask = VK_ACCESS_UNIFORM_READ_BIT;
         constants.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
@@ -821,75 +821,63 @@ struct Upscaler::Impl {
         between.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
         // Earlier work of the caller on the inputs (render, copies) is the caller's barrier.
         for (uint32_t index = 0; index < kPassCount; ++index) {
-            const std::string name = kPasses[index];
-            if ((name == "spd" && !f.auto_exposure) || (name == "rcas" && !f.sharpen)) {
+            const auto stamp = [&](uint32_t edge) {
+                if (f.profile_pool) vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                    f.profile_pool, f.profile_first_query + index * 2 + edge);
+            };
+            stamp(0);
+            if ((index == 0 && !f.auto_exposure) || (index == 28 && !f.sharpen)) {
+                stamp(1); // Both queries remain defined even for a skipped pass.
                 continue;
             }
-            const Pass& p = passes[index];
-            std::vector<VkWriteDescriptorSet> writes;
-            std::vector<VkDescriptorImageInfo> images;
-            std::vector<VkDescriptorBufferInfo> buffers;
-            images.reserve(p.refl.bindings.size());
-            buffers.reserve(p.refl.bindings.size());
-            for (const Binding& b : p.refl.bindings) {
-                VkWriteDescriptorSet w{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-                w.dstBinding = b.binding;
-                w.descriptorCount = 1;
-                w.descriptorType = b.type;
+            Pass& p = passes[index];
+            for (size_t binding = 0; binding < p.recipes.size(); ++binding) {
                 const auto image = [&](VkImageView view) {
-                    images.push_back({VK_NULL_HANDLE, view, VK_IMAGE_LAYOUT_GENERAL});
-                    w.pImageInfo = &images.back();
+                    p.images[binding] = {VK_NULL_HANDLE, view, VK_IMAGE_LAYOUT_GENERAL};
                 };
                 const auto buffer = [&](VkBuffer buf, VkDeviceSize offset, VkDeviceSize range) {
-                    buffers.push_back({buf, offset, range});
-                    w.pBufferInfo = &buffers.back();
+                    p.buffers[binding] = {buf, offset, range};
                 };
-                const std::string& n = b.name;
-                if (b.type == VK_DESCRIPTOR_TYPE_SAMPLER) {
-                    continue; // immutable
-                } else if (n == "r_input_color") image(f.color.view);
-                else if (n == "r_velocity") image(f.motion.view);
-                else if (n == "r_depth") image(f.depth.view);
-                else if (n == "r_history_color" || n == "rw_history_color") image(history.view);
-                else if (n == "r_reprojected_color" || n == "rw_reprojected_color") image(reprojected.view);
-                else if (n == "r_recurrent_0" || n == "rw_recurrent_0") image(recurrent.view);
-                else if (n == "r_auto_exposure_texture") image(exposure_image.view);
-                else if (n == "rw_auto_exposure_texture") image(exposure.view);
-                else if (n == "rw_spd_global_atomic") image(spd_atomic.view);
-                else if (n == "rw_autoexp_mip_5") image(spd_mip5.view);
-                else if (n == "rw_mlsr_output_color") image(f.sharpen ? mlsr_output.view : final_output->view);
-                else if (n == "r_rcas_input") image(mlsr_output.view);
-                else if (n == "rw_rcas_output") image(final_output->view);
-                else if (n == "ScratchBuffer") buffer(scratch.buffer, 0, VK_WHOLE_SIZE);
-                else if (n == "InitializerBuffer") buffer(initializer.buffer, 0, VK_WHOLE_SIZE);
-                else if (n == "MLSR_Optimized_Constants") buffer(ubo.buffer, slot, sizeof(Mlsr));
-                else if (n == "AutoExposureSPDConstants") buffer(ubo.buffer, slot + ubo_align, sizeof(Spd));
-                else if (n == "cbRCAS") buffer(ubo.buffer, slot + 2 * ubo_align, sizeof(Rcas));
-                else if (n == "CsTensorSizes") buffer(tensor_ubo.buffer, 0, 272);
-                else {
-                    error = name + ": unknown resource " + n;
-                    return false;
+                switch (p.recipes[binding]) {
+                case Resource::Color: image(f.color.view); break;
+                case Resource::Motion: image(f.motion.view); break;
+                case Resource::Depth: image(f.depth.view); break;
+                case Resource::History: image(history.view); break;
+                case Resource::Reprojected: image(reprojected.view); break;
+                case Resource::Recurrent: image(recurrent.view); break;
+                case Resource::ExposureInput: image(exposure_image.view); break;
+                case Resource::Exposure: image(exposure.view); break;
+                case Resource::SpdAtomic: image(spd_atomic.view); break;
+                case Resource::SpdMip5: image(spd_mip5.view); break;
+                case Resource::MlsrOutput: image(f.sharpen ? mlsr_output.view : final_output->view); break;
+                case Resource::RcasInput: image(mlsr_output.view); break;
+                case Resource::Output: image(final_output->view); break;
+                case Resource::Scratch: buffer(scratch.buffer, 0, VK_WHOLE_SIZE); break;
+                case Resource::Initializer: buffer(initializer.buffer, 0, VK_WHOLE_SIZE); break;
+                case Resource::MlsrConstants: buffer(ubo.buffer, slot, sizeof(Mlsr)); break;
+                case Resource::SpdConstants: buffer(ubo.buffer, slot + ubo_align, sizeof(Spd)); break;
+                case Resource::RcasConstants: buffer(ubo.buffer, slot + 2 * ubo_align, sizeof(Rcas)); break;
+                case Resource::TensorConstants: buffer(tensor_ubo.buffer, 0, 272); break;
                 }
-                writes.push_back(w);
             }
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, p.pipeline);
-            push_descriptors(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, p.layout, 0, uint32_t(writes.size()),
-                             writes.data());
+            push_descriptors(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, p.layout, 0, uint32_t(p.writes.size()),
+                             p.writes.data());
             uint32_t gx = 1, gy = 1;
-            if (name == "spd") {
+            if (index == 0) {
                 gx = CeilDiv(rw, 64);
                 gy = CeilDiv(rh, 64);
-            } else if (name == "rcas") {
+            } else if (index == 28) {
                 gx = CeilDiv(aw, 16);
                 gy = CeilDiv(ah, 16);
-            } else if (name == "prepass" || name == "postpass") {
-                const uint32_t* tile = name == "prepass" ? rules->prepass : rules->postpass;
+            } else if (index == 1 || index == 27) {
+                const uint32_t* tile = index == 1 ? rules->prepass : rules->postpass;
                 gx = CeilDiv(aw, tile[0]);
                 gy = CeilDiv(ah, tile[1]);
-            } else if (name.ends_with("_post")) {
+            } else if (index % 2 == 0) {
                 // Clears the border of a tensor: threads as the shader counts them (it stops the
                 // rest) from the tensor size and the tier's allocation (aligned).
-                const uint32_t k = name == "pass0_post" ? 0 : uint32_t(std::stoi(name.substr(4)));
+                const uint32_t k = (index - 2) / 2;
                 const uint32_t level = kPostLevel[k];
                 const uint32_t w = aw >> level, h = ah >> level;
                 const uint32_t align = rules->post_align;
@@ -900,25 +888,24 @@ struct Upscaler::Impl {
                 const uint32_t threads = (w + 1 + kx) + h + h * kx + (w + 1 + kx) * ky;
                 gx = CeilDiv(threads, p.refl.local_size[0]);
             } else {
-                const uint32_t k = uint32_t(std::stoi(name.substr(4)));
+                const uint32_t k = (index - 1) / 2;
                 const uint32_t level = kRunLevel[k];
                 gx = CeilDiv(aw >> level, rules->tile[k][0]);
                 gy = CeilDiv(ah >> level, rules->tile[k][1]);
             }
             vkCmdDispatch(cmd, gx, gy, 1);
-            if (profile_pool) {
-                vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, profile_pool,
-                                    query_base + 1 + profiled);
-                profile_pass[ring][profiled++] = uint8_t(index);
-            }
+            stamp(1);
             vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                                  VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &between, 0, nullptr, 0,
                                  nullptr);
         }
-        profile_count[ring] = profiled;
         return true;
     }
 };
+
+const char* ProfilePassName(uint32_t index) {
+    return index < kPassCount ? kPasses[index] : "invalid";
+}
 
 Upscaler::Upscaler(VkPhysicalDevice physical, VkDevice device, std::string dir, Features features)
     : impl{std::make_unique<Impl>(physical, device, std::move(dir), features)} {}

@@ -9,6 +9,7 @@
 #include <atomic>
 #include <cstdio>
 #include <cmath>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -45,6 +46,8 @@ struct Gpu {
     VkDevice device{};
     VkQueue queue{};
     uint32_t family = 0;
+    uint32_t timestamp_bits = 0;
+    float timestamp_period = 0;
     VkPhysicalDeviceMemoryProperties memory{};
 };
 
@@ -104,6 +107,10 @@ Gpu CreateGpu(bool fp8=false) {
     while (gpu.family < families && !(family_props[gpu.family].queueFlags & VK_QUEUE_COMPUTE_BIT)) {
         ++gpu.family;
     }
+
+    if (gpu.family == families) { std::fprintf(stderr,"No compute queue\n"); std::exit(1); }
+    gpu.timestamp_bits = family_props[gpu.family].timestampValidBits;
+    gpu.timestamp_period = props.limits.timestampPeriod;
 
     VkPhysicalDeviceComputeShaderDerivativesFeaturesKHR derivatives{
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_KHR};
@@ -251,7 +258,7 @@ int main(int argc,char **argv) {
     if(argc<3 || argc>9){std::fprintf(stderr,"usage: native-frame-test ASSETS NEW_OUTPUT.raw [RENDER_WxH] [OUTPUT_WxH] [FRAMES] [rgba16f|r11g11b10] [sharpen|no-sharpen] [int8|fp8]\n");return 2;}
     uint32_t rw=320,rh=180,ow=640,oh=360;int frames=argc>5?std::atoi(argv[5]):3;
     if((argc>3 && std::sscanf(argv[3],"%ux%u",&rw,&rh)!=2) ||
-       (argc>4 && std::sscanf(argv[4],"%ux%u",&ow,&oh)!=2) || !rw || !rh || rw>ow || rh>oh || ow>3840 || oh>2160 || frames<1 || frames>8){std::fprintf(stderr,"Supported output is up to 3840x2160, with 1 to 8 frames\n");return 2;}
+       (argc>4 && std::sscanf(argv[4],"%ux%u",&ow,&oh)!=2) || !rw || !rh || rw>ow || rh>oh || ow>3840 || oh>2160 || frames<1 || frames>10000){std::fprintf(stderr,"Supported output is up to 3840x2160, with 1 to 10000 frames\n");return 2;}
     if(double(ow)/rw>3.01 || double(oh)/rh>3.01){std::fprintf(stderr,"Upscale ratio exceeds the audited 3x model\n");return 2;}
     const std::string precision=argc>8?argv[8]:"int8";
     if(precision!="int8" && precision!="fp8"){std::fprintf(stderr,"Unknown precision\n");return 2;}
@@ -271,6 +278,15 @@ int main(int argc,char **argv) {
     setenv("BB_FSR411_VARIANT",fp8?"fp8":"int8",1);
     std::printf("EXPERIMENTAL native FSR 4.1.2 %s frame test; no AMD reference comparison yet.\n",fp8?"FP8":"INT8");
     const Gpu gpu=CreateGpu(fp8);
+    const bool benchmark=std::getenv("FSR412_BENCHMARK") && !std::strcmp(std::getenv("FSR412_BENCHMARK"),"1");
+    VkQueryPool profile_pool=VK_NULL_HANDLE;
+    constexpr uint32_t queries=2+2*Fsr411::kProfilePassCount;
+    if(benchmark) {
+        if(!gpu.timestamp_bits || gpu.timestamp_period<=0) { std::fprintf(stderr,"Queue timestamps unavailable\n");return 1; }
+        VkQueryPoolCreateInfo q{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};q.queryType=VK_QUERY_TYPE_TIMESTAMP;q.queryCount=queries;
+        CHECK(vkCreateQueryPool(gpu.device,&q,nullptr,&profile_pool));
+        std::puts("BENCH_HEADER,frame,cpu_record_ms,gpu_replay_ms,submit_wait_ms");
+    }
     const VkImageUsageFlags usage=VK_IMAGE_USAGE_SAMPLED_BIT|VK_IMAGE_USAGE_STORAGE_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT|VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     Image color=CreateImage(gpu,VK_FORMAT_R16G16B16A16_SFLOAT,rw,rh,usage,VK_IMAGE_ASPECT_COLOR_BIT);
     Image depth=CreateImage(gpu,VK_FORMAT_R32_SFLOAT,rw,rh,usage,VK_IMAGE_ASPECT_COLOR_BIT);
@@ -319,10 +335,34 @@ int main(int argc,char **argv) {
         std::printf("Replay precision: %s\n",fp8?"FP8 (native cooperative matrices)":"INT8");
         for(int i=0;i<frames;i++) {
             CHECK(vkBeginCommandBuffer(cmd,&begin));Fsr411::Frame f;f.cmdbuf=cmd;f.color={color.image,color.view,rw,rh};f.depth={depth.image,depth.view,rw,rh};f.motion={motion.image,motion.view,rw,rh};f.output={output.image,output.view,ow,oh};f.render_width=rw;f.render_height=rh;f.ultra_performance=double(ow)/rw>2.5;f.jitter[0]=0.25f*float(i%4)-0.375f;f.jitter[1]=0.125f;f.sharpen=sharpening=="sharpen";f.sharpness=f.sharpen?0.5f:0.0f;f.reset=i==0;f.auto_exposure=true;
+            if(benchmark) {
+                vkCmdResetQueryPool(cmd,profile_pool,0,queries);
+                vkCmdWriteTimestamp(cmd,VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,profile_pool,0);
+                f.profile_pool=profile_pool;f.profile_first_query=2;
+            }
+            const auto cpu_begin=std::chrono::steady_clock::now();
             if(!upscaler.Record(f)){std::fprintf(stderr,"Native replay failed: %s\n",upscaler.Error().c_str());std::fclose(file);return 1;}
-            submit();std::printf("Native Vulkan frame %d completed (%ux%u -> %ux%u)\n",i,rw,rh,ow,oh);
+            const auto cpu_end=std::chrono::steady_clock::now();
+            if(benchmark) vkCmdWriteTimestamp(cmd,VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,profile_pool,1);
+            const auto submit_begin=std::chrono::steady_clock::now();
+            submit();
+            const auto submit_end=std::chrono::steady_clock::now();
+            if(benchmark) {
+                // submit() waited for the fence: reset/read/destruction cannot race the GPU.
+                std::array<uint64_t,queries> ticks{};
+                CHECK(vkGetQueryPoolResults(gpu.device,profile_pool,0,queries,sizeof(ticks),ticks.data(),sizeof(uint64_t),VK_QUERY_RESULT_64_BIT));
+                const uint64_t mask=gpu.timestamp_bits==64?UINT64_MAX:((uint64_t(1)<<gpu.timestamp_bits)-1);
+                const auto ms=[&](uint32_t a,uint32_t b){return double((ticks[b]-ticks[a])&mask)*gpu.timestamp_period*1e-6;};
+                std::printf("BENCH,%d,%.6f,%.6f,%.6f\n",i,
+                    std::chrono::duration<double,std::milli>(cpu_end-cpu_begin).count(),ms(0,1),
+                    std::chrono::duration<double,std::milli>(submit_end-submit_begin).count());
+                for(uint32_t pass=0;pass<Fsr411::kProfilePassCount;++pass)
+                    std::printf("PASS,%d,%s,%.6f\n",i,Fsr411::ProfilePassName(pass),ms(2+2*pass,3+2*pass));
+            }
+            std::printf("Native Vulkan frame %d completed (%ux%u -> %ux%u)\n",i,rw,rh,ow,oh);
         }
     }
+    if(profile_pool) vkDestroyQueryPool(gpu.device,profile_pool,nullptr);
     const VkDeviceSize size=VkDeviceSize(ow)*oh*(packed?4:8);
     Buffer readback=CreateHostBuffer(gpu,size,VK_BUFFER_USAGE_TRANSFER_DST_BIT);
     CHECK(vkBeginCommandBuffer(cmd,&begin));barrier.srcAccessMask=VK_ACCESS_SHADER_WRITE_BIT;barrier.dstAccessMask=VK_ACCESS_TRANSFER_READ_BIT;
