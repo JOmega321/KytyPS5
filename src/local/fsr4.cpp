@@ -135,7 +135,12 @@ bool Fsr4Upscale(GraphicContext& graphics, vk::CommandBuffer command, const Fram
             b.subresourceRange = {depth ? vk::ImageAspectFlagBits::eDepth : vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1};
             if (format == vk::Format::eD32SfloatS8Uint) b.subresourceRange.aspectMask |= vk::ImageAspectFlagBits::eStencil;
         }
-        command.pipelineBarrier(vk::PipelineStageFlagBits::eAllCommands, vk::PipelineStageFlagBits::eAllCommands,
+        // Only compute shaders access these four external images inside the replay.
+        // Upload/reset transfers touch private images/buffers. The caller's producers
+        // and consumers can include copies, attachments and fallback paths: retain
+        // ALL_COMMANDS on that side, with the original access/layout/aspect contract.
+        command.pipelineBarrier(restore ? vk::PipelineStageFlagBits::eComputeShader : vk::PipelineStageFlagBits::eAllCommands,
+                                restore ? vk::PipelineStageFlagBits::eAllCommands : vk::PipelineStageFlagBits::eComputeShader,
                                 {}, {}, {}, barriers);
     };
     barrier(false);
