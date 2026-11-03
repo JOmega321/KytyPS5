@@ -14,6 +14,7 @@
 #include "local-platform.h"
 #include "parallel-pages.h"
 #include "spin-gate.h"
+#include "write-guard.h"
 
 #include <algorithm>
 #include <atomic>
@@ -55,6 +56,13 @@ namespace AsyncUpload {
 // True on the worker's thread (a fault there cannot wait for the render thread, which may wait for the worker).
 inline thread_local bool t_worker = false;
 
+// KYTY_SERVE_IN_WAITS (GuestGpu::ServeInWaits), set by the GPU thread. Asked only by a Wait that was told to serve
+// (the drains before a guest memory write of the command processor and at the frame boundary; a submit's or an
+// unmap's drain never serves). With false: whether that Wait spins to the copies' end, running the guest commands
+// queued for the GPU thread meanwhile (a game thread's readback fault waits for its command there); with true: run
+// them, true when some ran.
+inline bool (*g_serve_hook)(bool serve) = nullptr;
+
 class Worker {
 public:
 	static constexpr uint64_t Capacity = 1u << 16;
@@ -92,6 +100,8 @@ public:
 	}
 	// Render thread only: the sequence number of the last pushed copy.
 	[[nodiscard]] uint64_t Pushed() const { return m_head.load(std::memory_order_relaxed); }
+	// Render thread only: the sequence number of the last finished job (KYTY_WRITE_GUARD: whether any is pending).
+	[[nodiscard]] uint64_t Done() const { return m_done.load(std::memory_order_acquire); }
 	// Render thread only: the sequence number of the last pending job on guest [vaddr, vaddr + size), or 0.
 	[[nodiscard]] uint64_t PendingOn(uint64_t vaddr, uint64_t size) const {
 		const uint64_t head = m_head.load(std::memory_order_relaxed);
@@ -103,8 +113,9 @@ public:
 		return last;
 	}
 
-	// Any thread: returns once every copy up to `sequence` is in staging memory.
-	void Wait(uint64_t sequence) {
+	// Any thread: returns once every copy up to `sequence` is in staging memory. `serve`: GPU thread only, run the
+	// guest commands queued meanwhile (g_serve_hook).
+	void Wait(uint64_t sequence, bool serve = false) {
 		if (m_done.load(std::memory_order_acquire) >= sequence) return;
 		const auto start = std::chrono::steady_clock::now();
 		const auto note  = [&] {
@@ -112,6 +123,12 @@ public:
 			LiveCensus::g_upload_wait_ns.fetch_add(ns, std::memory_order_relaxed);
 			LiveCounters::Add(LiveCounters::UploadWaitUs, static_cast<uint64_t>(ns) / 1000u);
 		};
+		if (serve && g_serve_hook != nullptr && g_serve_hook(false)) {
+			Kick();
+			while (m_done.load(std::memory_order_acquire) < sequence)
+				if (!g_serve_hook(true)) _mm_pause();
+			return note();
+		}
 		for (int spin = 0; spin < 4000; ++spin) {
 			if (m_done.load(std::memory_order_acquire) >= sequence) return note();
 			_mm_pause();
@@ -184,6 +201,7 @@ private:
 	void Run() {
 		LocalPlatform::SetThreadName("Kyty.Upload");
 		t_worker = true;
+		WriteGuard::t_no_wait = true; // (KYTY_WRITE_GUARD: the lifts are this thread's jobs)
 		// Created by the render thread: do not inherit its dedicated CPU.
 		LocalPlatform::PinThreadToCpuList(std::getenv("KYTY_RECORDING_CPUS"));
 		// Pause iterations the worker polls for new copies before it sleeps (while its CPUs idle: spin-gate.h).
@@ -359,14 +377,15 @@ inline void Wait(uint64_t sequence) {
 }
 
 // Render thread: every recorded copy reaches staging memory before this returns; the jobs the worker is not at made
-// here where kyty_local_upload_help says (above).
-inline void Drain() {
+// here where kyty_local_upload_help says (above). `serve`: the guest commands queued for the GPU thread run meanwhile
+// (KYTY_SERVE_IN_WAITS); only from a drain that no command and no submit is inside.
+inline void Drain(bool serve = false) {
 	if (const auto sequence = SubmitSequence(); sequence != 0) {
 		const auto help = kyty_local_upload_help.load(std::memory_order_relaxed);
 		if (help == 1 || (help == 2 && !SpinGate::g_open.load(std::memory_order_relaxed)))
 			Get().Help(sequence);
 		else
-			Get().Wait(sequence);
+			Get().Wait(sequence, serve);
 	}
 }
 
