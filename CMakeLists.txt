@@ -450,6 +450,8 @@ list(APPEND kyty_emulator_src
 	"${KYTY_SOURCE_DIR}/local/fsr-native.h"
 	"${KYTY_SOURCE_DIR}/local/fsr-native.cpp"
 	"${KYTY_SOURCE_DIR}/local/fsr4.cpp"
+	"${KYTY_SOURCE_DIR}/local/fsr4-framegen.h"
+	"${KYTY_SOURCE_DIR}/local/fsr4-framegen.cpp"
 	"${KYTY_SOURCE_DIR}/local/fsr411/fsr411.cpp"
 	"${KYTY_SOURCE_DIR}/local/perf-overlay.h"
 	"${KYTY_SOURCE_DIR}/local/perf-overlay.cpp"
@@ -469,6 +471,28 @@ set(kyty_emulator_link_libraries common Vulkan::Headers spirv-tools-opt spirv-to
 # (src/local/fsr-native.h); Windows' FSR frame generation loads AMD's runtime instead (frame-gen.cpp).
 if (LINUX OR WIN32)
 	list(APPEND kyty_emulator_link_libraries kyty_fidelityfx)
+endif()
+
+# Linux: AMD's FSR Frame Generation 4.0.2 runtime run without Wine (tools/fsr4fg-vk/fg_runtime.c, src/local/fsr4-framegen.h)
+# and the self-test program the emulator starts before it uses it.
+if(LINUX AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+	find_package(Python3 REQUIRED COMPONENTS Interpreter)
+	set(fsr4fg_dir "${CMAKE_CURRENT_SOURCE_DIR}/tools/fsr4fg-vk")
+	set(fsr4fg_thunks "${CMAKE_CURRENT_BINARY_DIR}/fsr4fg_vk_thunks.c")
+	add_custom_command(OUTPUT "${fsr4fg_thunks}"
+		COMMAND "${Python3_EXECUTABLE}" -I "${fsr4fg_dir}/gen_vk_thunks.py" "${KYTY_THIRD_PARTY_DIR}/Vulkan-Headers" "${fsr4fg_thunks}"
+		DEPENDS "${fsr4fg_dir}/gen_vk_thunks.py" "${KYTY_THIRD_PARTY_DIR}/Vulkan-Headers/registry/vk.xml" VERBATIM)
+	add_library(kyty_fsr4fg STATIC "${fsr4fg_dir}/pehost.c" "${fsr4fg_dir}/fg_runtime.c" "${fsr4fg_thunks}")
+	target_include_directories(kyty_fsr4fg PUBLIC "${fsr4fg_dir}" PRIVATE "${KYTY_THIRD_PARTY_DIR}/Vulkan-Headers/include")
+	# (The files follow Windows' calling convention and types: their warnings are not this project's. No profile: AMD's
+	# thread is not what the game's profile measured.)
+	target_compile_options(kyty_fsr4fg PRIVATE -std=gnu2x -w "-D__declspec(x)=" -fno-profile-instr-use)
+	list(APPEND kyty_emulator_link_libraries kyty_fsr4fg)
+	add_executable(fsr4fg-gpu "${fsr4fg_dir}/gpu_fg.c")
+	target_include_directories(fsr4fg-gpu PRIVATE "${fsr4fg_dir}" "${KYTY_THIRD_PARTY_DIR}/Vulkan-Headers/include")
+	target_compile_options(fsr4fg-gpu PRIVATE -std=gnu2x -w "-D__declspec(x)=" -fno-profile-instr-use)
+	target_link_libraries(fsr4fg-gpu PRIVATE kyty_fsr4fg dl m pthread)
+	set_property(SOURCE "${KYTY_SOURCE_DIR}/local/fsr4-framegen.cpp" APPEND PROPERTY INCLUDE_DIRECTORIES "${fsr4fg_dir}")
 endif()
 
 # Linux system libraries required by the static FFmpeg archive.

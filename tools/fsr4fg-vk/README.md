@@ -44,6 +44,25 @@ hashes, group counts, binding names, resource shapes and the small constant buff
 - AMD clears its two-channel splat targets with stale words in the unused channels; the contract keeps only real ones.
 - Reported memory at 2560x1440: 199.8 MB (116.9 MB aliasable).
 
+## In the emulator
+
+`fg_runtime.c` (this tool's test program uses the same code) and `src/local/fsr4-framegen.cpp` run AMD's runtime in the
+game, where FSR 3 built in would otherwise make the frame (`FrameGen::Generate`):
+
+1. The launcher's "FSR4 setup" page prepares the files (`build_assets.sh`: AMD's DLL by download or from disk, checked by
+   hash; never shipped). Choosing FSR 4 frame generation sets `KYTY_FSR4FG_DIR` and RADV's matrix setting.
+2. At startup the emulator runs `fsr4fg-gpu --self-test`, as the game will use it (`FG-TEST.md`). A verdict is kept, so
+   this costs a fraction of a second after the first time.
+3. The device gets what AMD's programs declare. AMD's thread starts, and its pipelines compile in the background: until
+   they are done (some seconds, the first time) frames are shown without a generated one.
+4. FSR 3 takes over, with one line in the log saying why (`Frame generation: FSR 4 not used, FSR 3 instead: ...`), when
+   the self-test failed or could not run, the device differs from the tested one or lacks a feature, AMD's context is
+   not ready within two minutes, or anything stops AMD's runtime later. A crash inside the driver is only caught by the
+   self-test.
+
+`KYTY_FRAME_CSV=<file>` records each game frame's time, the render thread's busy part, and frame generation's CPU and
+GPU time, for any generator; `tools/local/frame-csv-summary.py` summarizes captures side by side.
+
 ## Limits
 
 The synthetic device answers every feature query positively (FP8 ones only with the FP8 profile), so this records

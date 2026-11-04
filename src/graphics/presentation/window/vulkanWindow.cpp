@@ -109,6 +109,14 @@ static bool HasExtension(const std::vector<const char*>& extensions, const char*
 	                   [name](const char* ext) { return strcmp(ext, name) == 0; });
 }
 
+// FSR 4 frame generation (fsr4-framegen.h). (Some of these the FP8 upscaler has just added.)
+static void AddFsr4FrameGenExtensions(const std::vector<vk::ExtensionProperties>& available, std::vector<const char*>& extensions) {
+	if (!FrameGen::Fsr4Requested()) return;
+	for (const char* extension: {"VK_EXT_shader_float8", "VK_KHR_cooperative_matrix", "VK_NV_cooperative_matrix2", "VK_EXT_shader_image_atomic_int64"}) {
+		if (HasExtension(available, extension) && !HasExtension(extensions, extension)) extensions.push_back(extension);
+	}
+}
+
 #if defined(_WIN32)
 // KYTY_FULLSCREEN_EXCLUSIVE=0|1 (GraphicContext::full_screen_exclusive): -1 when unset.
 static int FullscreenExclusiveRequest() {
@@ -947,11 +955,19 @@ static vk::Device VulkanCreateDevice(vk::PhysicalDevice physical_device, const V
         fsr_derivatives.pNext = supported_features2.pNext;
         supported_features2.pNext = &fsr_derivatives;
     }
-    const bool fp8_extensions = fp8_requested && fsr_extensions &&
-        HasExtension(device_extensions, "VK_EXT_shader_float8") &&
+    const bool matrix_extensions = HasExtension(device_extensions, "VK_EXT_shader_float8") &&
         HasExtension(device_extensions, "VK_KHR_cooperative_matrix") &&
         HasExtension(device_extensions, "VK_NV_cooperative_matrix2");
-    if (fp8_extensions) {
+    const bool fp8_extensions = fp8_requested && fsr_extensions && matrix_extensions;
+    // FSR 4 frame generation (fsr4-framegen.h): FP8 programs too, whatever the upscaler is, and 64-bit image atomics.
+    const bool fg4_extensions = FrameGen::Fsr4Requested() && matrix_extensions &&
+        HasExtension(device_extensions, "VK_EXT_shader_image_atomic_int64");
+    vk::PhysicalDeviceShaderImageAtomicInt64FeaturesEXT fg4_atomic{};
+    if (fg4_extensions) {
+        fg4_atomic.pNext = supported_features2.pNext;
+        supported_features2.pNext = &fg4_atomic;
+    }
+    if (fp8_extensions || fg4_extensions) {
         fsr_float8.pNext = supported_features2.pNext;
         fsr_matrix.pNext = &fsr_float8;
         fsr_matrix2.pNext = &fsr_matrix;
@@ -979,6 +995,17 @@ static vk::Device VulkanCreateDevice(vk::PhysicalDevice physical_device, const V
         supported_features13.subgroupSizeControl && supported_features13.computeFullSubgroups &&
         graphics.min_subgroup_size <= 32 && graphics.max_subgroup_size >= 32 &&
         bool(graphics.required_subgroup_size_stages & vk::ShaderStageFlagBits::eCompute);
+    const bool fg4_device = fg4_extensions && fg4_atomic.shaderImageInt64Atomics &&
+        fsr_float8.shaderFloat8 && fsr_float8.shaderFloat8CooperativeMatrix &&
+        fsr_matrix.cooperativeMatrix && fsr_matrix2.cooperativeMatrixConversions &&
+        fsr_pointers.variablePointers && fsr_pointers.variablePointersStorageBuffer &&
+        fsr_storage16.storageBuffer16BitAccess && supported_features12.shaderFloat16 && supported_features12.shaderInt8 &&
+        supported_features12.vulkanMemoryModel && supported_features12.vulkanMemoryModelDeviceScope &&
+        supported_features13.subgroupSizeControl && supported_features13.computeFullSubgroups &&
+        supported_features2.features.shaderInt16 && supported_features2.features.shaderStorageImageExtendedFormats &&
+        graphics.min_subgroup_size <= 32 && graphics.max_subgroup_size >= 32 &&
+        bool(graphics.required_subgroup_size_stages & vk::ShaderStageFlagBits::eCompute);
+    if (FrameGen::Fsr4Requested() && !fg4_device) FrameGen::Fsr4Refuse("this Vulkan device lacks what AMD's programs need");
     if (fp8_requested)
         std::printf("FSR 4.1.2 FP8 device: extensions=%u float8=%u matrixFloat8=%u matrix=%u conversions=%u pointers=%u storage16=%u memoryModel=%u sizeControl=%u fullSubgroups=%u enabled=%u\n",
             unsigned(fp8_extensions), unsigned(fsr_float8.shaderFloat8), unsigned(fsr_float8.shaderFloat8CooperativeMatrix),
@@ -992,8 +1019,9 @@ static vk::Device VulkanCreateDevice(vk::PhysicalDevice physical_device, const V
             unsigned(supported_features12.shaderFloat16), unsigned(supported_features12.shaderInt8),
             unsigned(supported_features2.features.shaderInt16), unsigned(supported_features13.shaderIntegerDotProduct),
             unsigned(supported_features2.features.shaderStorageImageExtendedFormats), unsigned(graphics.fsr412_enabled));
-    if (graphics.fsr412_fp8_enabled) features12.vulkanMemoryModel = VK_TRUE;
-    if (graphics.fsr412_enabled) {
+    if (graphics.fsr412_fp8_enabled || fg4_device) features12.vulkanMemoryModel = VK_TRUE;
+    if (fg4_device) features12.vulkanMemoryModelDeviceScope = VK_TRUE;
+    if (graphics.fsr412_enabled || fg4_device) {
         features12.shaderFloat16 = VK_TRUE;
         features12.shaderInt8 = VK_TRUE;
     }
@@ -1143,13 +1171,14 @@ static vk::Device VulkanCreateDevice(vk::PhysicalDevice physical_device, const V
 	// (Without robustness2 the chain still takes the barycentrics where the GPU has them: robustness2.pNext's head.)
 	features13.pNext = robustness2_ext_enabled ? static_cast<void*>(&robustness2) : robustness2.pNext;
 	features13.robustImageAccess   = supported_features13.robustImageAccess;
-    if (graphics.fsr412_enabled) {
-        features13.shaderIntegerDotProduct = VK_TRUE;
+    if (graphics.fsr412_enabled) features13.shaderIntegerDotProduct = VK_TRUE;
+    if (graphics.fsr412_enabled || fg4_device) {
         device_features.shaderInt16 = VK_TRUE;
         device_features.shaderStorageImageExtendedFormats = VK_TRUE;
     }
-	features13.subgroupSizeControl = (subgroup_size_control_enabled || graphics.fsr412_fp8_enabled) ? VK_TRUE : VK_FALSE;
-    if (graphics.fsr412_fp8_enabled) features13.computeFullSubgroups = VK_TRUE;
+    if (fg4_device) device_features.shaderStorageImageReadWithoutFormat = supported_features2.features.shaderStorageImageReadWithoutFormat;
+	features13.subgroupSizeControl = (subgroup_size_control_enabled || graphics.fsr412_fp8_enabled || fg4_device) ? VK_TRUE : VK_FALSE;
+    if (graphics.fsr412_fp8_enabled || fg4_device) features13.computeFullSubgroups = VK_TRUE;
 	features13.pipelineCreationCacheControl = supported_features13.pipelineCreationCacheControl;
 	graphics.pipeline_cache_control_enabled = features13.pipelineCreationCacheControl == VK_TRUE;
 
@@ -1244,7 +1273,13 @@ static vk::Device VulkanCreateDevice(vk::PhysicalDevice physical_device, const V
         fsr_derivatives.computeDerivativeGroupQuads = VK_FALSE;
         create_info.pNext = &fsr_derivatives;
     }
-    if (graphics.fsr412_fp8_enabled) {
+    if (fg4_device) {
+        fg4_atomic = vk::PhysicalDeviceShaderImageAtomicInt64FeaturesEXT{};
+        fg4_atomic.shaderImageInt64Atomics = VK_TRUE;
+        fg4_atomic.pNext = const_cast<void*>(create_info.pNext);
+        create_info.pNext = &fg4_atomic;
+    }
+    if (graphics.fsr412_fp8_enabled || fg4_device) {
         fsr_float8.shaderFloat8 = fsr_float8.shaderFloat8CooperativeMatrix = VK_TRUE;
         fsr_matrix.cooperativeMatrix = VK_TRUE;
         fsr_matrix.cooperativeMatrixRobustBufferAccess = VK_FALSE;
@@ -1764,6 +1799,7 @@ void WindowContext::CreateVulkan() {
                     if (HasExtension(available_extensions, extension)) device_extensions.push_back(extension);
             }
         }
+        AddFsr4FrameGenExtensions(available_extensions, device_extensions);
 		AntiLag::AddDeviceExtension(available_extensions, device_extensions); // (KYTY_LOW_LATENCY)
 		// KYTY_PIPELINE_STATS=<hash,...> (diagnostic): the driver's statistics of those compute programs' pipelines
 		// (registers, spills, waves per SIMD: PIPESTATS lines, CreatePipelineInternal).
@@ -1990,6 +2026,7 @@ bool CreateHeadlessGraphicContext(GraphicContext& graphic_ctx) {
                     if (HasExtension(available_extensions, extension)) device_extensions.push_back(extension);
             }
         }
+        AddFsr4FrameGenExtensions(available_extensions, device_extensions);
 		if (HasExtension(available_extensions, VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME)) {
 			device_extensions.push_back(VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME);
 		}

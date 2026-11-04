@@ -1,6 +1,7 @@
 #include "frame-gen.h"
 #include "frame-gen-hudless.h"
 #include "fsr-native.h"
+#include "fsr4-framegen.h"
 
 #include "common/logging/log.h"
 #include "graphics/guest_gpu/pm4.h"
@@ -1593,6 +1594,7 @@ void Initialize() {
 		g_fsr_native = true;
 		std::printf("Frame generation: AMD FSR 3 (2x, built in)\n");
 		std::fflush(stdout);
+		Fsr4Fg::Initialize();
 	}
 	if (g_generate == 0 && !g_upscale) {
 		return;
@@ -1869,7 +1871,10 @@ void OnDevice(vk::Instance instance, vk::PhysicalDevice physical_device, vk::Dev
 		std::fflush(stdout);
 	}
 	// (FSR 3 built in: its contexts are made by the present thread with the first frame it generates.)
-	if (g_fsr_native) g_ready = true;
+	if (g_fsr_native) {
+		g_ready = true;
+		Fsr4Fg::OnDevice(instance, physical_device, device);
+	}
 	if (g_generate > 0 && !g_ready) g_generate = 0; // (no NGX: Requested() and the rest see it off)
 #endif
 	if (g_generate == 0 || g_fsr || g_fsr_native) {
@@ -2745,7 +2750,16 @@ bool FsrMarksHud() {
 	return g_fsr || g_fsr_native;
 }
 
+bool Fsr4Requested() {
+	return Fsr4Fg::Requested();
+}
+
+void Fsr4Refuse(const char* reason) {
+	Fsr4Fg::Refuse(reason);
+}
+
 const char* FsrName() {
+	if (g_fsr_native && Fsr4Fg::Generating()) return "FSR 4";
 #ifdef KYTY_FRAMEGEN_FSR
 	if (g_fsr && g_fsr_state.fsr4.load(std::memory_order_relaxed)) return "FSR 4";
 #endif
@@ -3241,9 +3255,11 @@ uint32_t Generate(GraphicContext& graphics, vk::CommandBuffer command, const Fra
 		const float height = static_cast<float>(inputs->render_extent.height);
 		// (FSR's documented convention, DLSS-G's here: the projection's offset in pixels, y down.)
 		fsr.jitter_px = {inputs->camera.jitter_ndc[0] * width * 0.5f, -inputs->camera.jitter_ndc[1] * height * 0.5f};
+		Fsr4Fg::Camera axes;
 		if (const auto camera = Decompose(inputs->camera.view_proj); camera.valid) {
 			fsr.near_plane = camera.z_near;
 			fsr.fov_y      = 2.0f * std::atan(1.0f / std::fabs(camera.sy));
+			axes           = {camera.position, camera.up, camera.right, camera.forward};
 		}
 		// The game's frame time: the time between the frames given here, a long gap (a load, a pause) left out.
 		static auto last  = std::chrono::steady_clock::time_point {};
@@ -3262,6 +3278,16 @@ uint32_t Generate(GraphicContext& graphics, vk::CommandBuffer command, const Fra
 			const auto& hud = h.images[h.index];
 			fsr.hudless     = {hud.image,       h.views[h.index], vk::ImageLayout::eShaderReadOnlyOptimal, hud.format,
 			                   backbuffer.extent, hud.usage,       0,                                      0};
+		}
+		// (FSR 4 when it can; its failures end up here, in FSR 3, with a reason logged once. What it may have recorded before
+		// stopping is finished work on images FSR 3 starts over from.)
+		if (Fsr4Fg::Requested()) {
+			switch (Fsr4Fg::Generate(graphics, command, fsr, outputs[0], axes)) {
+				case Fsr4Fg::Result::Generated: g_fg_history = true; return 1;
+				case Fsr4Fg::Result::NoFrame: g_fg_history = true; return 0;
+				case Fsr4Fg::Result::Starting: g_fg_history = false; return 0; // (its first frame is then a reset)
+				case Fsr4Fg::Result::Unavailable: fsr.reset = true; break;
+			}
 		}
 		const bool made = FsrNative::Interpolate(graphics, command, fsr, outputs[0]);
 		g_fg_history    = true;
