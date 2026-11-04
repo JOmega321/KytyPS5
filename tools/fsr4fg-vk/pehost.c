@@ -21,11 +21,17 @@
 #define W WINAPI_ABI
 typedef uint16_t wchar16;
 
+static void (*g_fatal_handler)(const char* text);
 static void die(const char* what, const char* detail) {
-	fprintf(stderr, "pehost: %s%s%s\n", what, detail ? ": " : "", detail ? detail : "");
+	char text[512];
+	snprintf(text, sizeof(text), "%s%s%s", what, detail ? ": " : "", detail ? detail : "");
+	fprintf(stderr, "pehost: %s\n", text);
 	fflush(stderr);
+	if (g_fatal_handler) g_fatal_handler(text);
 	_exit(PE_EXIT_FATAL);
 }
+void PeSetFatalHandler(void (*handler)(const char* text)) { g_fatal_handler = handler; }
+void PeFatal(const char* text) { die(text, NULL); }
 
 // ---------------------------------------------------------------------------------------------------- PE image
 struct PeModule {

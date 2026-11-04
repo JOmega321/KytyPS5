@@ -8,6 +8,7 @@
 #define VK_NO_PROTOTYPES
 #include <dirent.h>
 #include <dlfcn.h>
+#include <asm/prctl.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <math.h>
@@ -21,73 +22,33 @@
 #include <sys/prctl.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <ucontext.h>
 #include <unistd.h>
 #include <vulkan/vulkan_core.h>
 
-#include "ffx/api/include/vk/ffx_api_vk.h"
-#include "ffx/framegeneration/include/ffx_framegeneration.h"
+#include "fg_runtime.h"
 #include "pehost.h"
 #include "vk_thunks.h"
 
-#define W __attribute__((ms_abi))
+#define sha256_hex FgRtSha256Hex
+#define GUEST_END 0xFC00000000ull // (above the emulator's guest range: see reserve_guest_layout)
 #define CHECK(x)                                                                                                       \
 	do {                                                                                                               \
 		VkResult r_ = (x);                                                                                             \
 		if (r_ != VK_SUCCESS) { fprintf(stderr, "%s:%d: %s = %d\n", __FILE__, __LINE__, #x, r_); exit(4); }           \
 	} while (0)
 
-// ------------------------------------------------------------------------------------------------ SHA-256
-typedef struct Sha { uint32_t h[8]; uint64_t n; uint8_t b[64]; } Sha;
-static const uint32_t K[64] = {
-    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01,
-    0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
-    0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147,
-    0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08,
-    0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
-    0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2};
-#define ROR(x, n) (((x) >> (n)) | ((x) << (32 - (n))))
-static void sha_block(Sha* s, const uint8_t* p) {
-	uint32_t w[64], a[8];
-	for (int i = 0; i < 16; i++) w[i] = (uint32_t)p[4 * i] << 24 | (uint32_t)p[4 * i + 1] << 16 | (uint32_t)p[4 * i + 2] << 8 | p[4 * i + 3];
-	for (int i = 16; i < 64; i++)
-		w[i] = w[i - 16] + (ROR(w[i - 15], 7) ^ ROR(w[i - 15], 18) ^ (w[i - 15] >> 3)) + w[i - 7] +
-		       (ROR(w[i - 2], 17) ^ ROR(w[i - 2], 19) ^ (w[i - 2] >> 10));
-	memcpy(a, s->h, sizeof(a));
-	for (int i = 0; i < 64; i++) {
-		uint32_t t1 = a[7] + (ROR(a[4], 6) ^ ROR(a[4], 11) ^ ROR(a[4], 25)) + ((a[4] & a[5]) ^ (~a[4] & a[6])) + K[i] + w[i];
-		uint32_t t2 = (ROR(a[0], 2) ^ ROR(a[0], 13) ^ ROR(a[0], 22)) + ((a[0] & a[1]) ^ (a[0] & a[2]) ^ (a[1] & a[2]));
-		memmove(a + 1, a, 7 * sizeof(uint32_t));
-		a[4] += t1;
-		a[0] = t1 + t2;
-	}
-	for (int i = 0; i < 8; i++) s->h[i] += a[i];
-}
-static void sha256_hex(const void* data, size_t n, char out[65]) {
-	Sha s = {{0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19}, 0, {0}};
-	const uint8_t* p = data;
-	size_t i = 0;
-	for (; i + 64 <= n; i += 64) sha_block(&s, p + i);
-	uint8_t tail[128] = {0};
-	size_t r = n - i;
-	memcpy(tail, p + i, r);
-	tail[r] = 0x80;
-	size_t len = r < 56 ? 64 : 128;
-	uint64_t bits = (uint64_t)n * 8;
-	for (int k = 0; k < 8; k++) tail[len - 1 - k] = (uint8_t)(bits >> (8 * k));
-	sha_block(&s, tail);
-	if (len == 128) sha_block(&s, tail + 64);
-	for (int k = 0; k < 8; k++) sprintf(out + 8 * k, "%08x", s.h[k]);
-}
-
 // ------------------------------------------------------------------------------------------------ options/state
 typedef struct Options {
 	const char *dll, *prepared, *out, *provider;
 	uint32_t    dw, dh, rw, rh, frames, timing_frames, self_test_timeout;
 	bool        hud, full_subgroups, probe, organic, guest_layout, no_pictures, identity, self_test, force;
+	bool        game_inputs, hudless_image, hudless_desc, pq;
+	VkFormat    color_format, depth_format;
+	uint32_t    resize_at, resize_w, resize_h;
 } Options;
 static Options opt;
 
@@ -100,8 +61,6 @@ static VkQueue                   queue;
 static uint32_t                  queue_family;
 static uint64_t                  timestamp_mask;
 static VkPhysicalDeviceMemoryProperties memory_props;
-static unsigned substituted, passed_through, full_subgroup_pipelines, pipeline_failures, pipelines_created;
-static double   pipeline_ms;
 
 // ------------------------------------------------------------------------------------------------ crash reports
 // What the test was doing, for a report if the process dies (a crash in the driver, in AMD's code or here).
@@ -130,8 +89,9 @@ static void where(const char* what, uintptr_t address) {
 static void crashed(int sig, siginfo_t* si, void* uc_) {
 	ucontext_t* uc = uc_;
 	char line[768];
+	const char* doing = fg_rt_stage;
 	snprintf(line, sizeof(line), "\n[FG] STOPPED by signal %d (%s) while: %s %s\n  last Vulkan call from AMD's code: %s (%lu calls)\n",
-	         sig, strsignal(sig), stage, stage_detail, vk_thunk_last ? vk_thunk_last : "none", vk_thunk_calls);
+	         sig, strsignal(sig), doing ? doing : stage, doing ? fg_rt_stage_detail : stage_detail, vk_thunk_last ? vk_thunk_last : "none", vk_thunk_calls);
 	say(line);
 	if (sig != SIGINT && sig != SIGTERM) {
 		uintptr_t rip = (uintptr_t)uc->uc_mcontext.gregs[REG_RIP], rsp = (uintptr_t)uc->uc_mcontext.gregs[REG_RSP];
@@ -144,8 +104,7 @@ static void crashed(int sig, siginfo_t* si, void* uc_) {
 	raise(sig);
 }
 static void install_crash_reports(void) {
-	static uint8_t alt[1 << 16];
-	stack_t ss = {.ss_sp = alt, .ss_size = sizeof(alt)};
+	stack_t ss = {.ss_sp = malloc(1 << 16), .ss_size = 1 << 16}; // (per thread: the test's and AMD's)
 	sigaltstack(&ss, NULL);
 	struct sigaction sa;
 	memset(&sa, 0, sizeof(sa));
@@ -167,139 +126,6 @@ VKFN(vkQueueSubmit); VKFN(vkCreateFence); VKFN(vkWaitForFences); VKFN(vkResetFen
 VKFN(vkCmdResetQueryPool); VKFN(vkCmdWriteTimestamp); VKFN(vkGetQueryPoolResults); VKFN(vkDeviceWaitIdle);
 VKFN(vkResetCommandBuffer);
 
-// ------------------------------------------------------------------------------------------------ overrides (ms_abi)
-typedef struct ModuleInfo { VkShaderModule module; bool matrix, replaced; char hash[17]; } ModuleInfo;
-static ModuleInfo* modules;
-static size_t      module_count, module_cap;
-
-static bool has_matrix_capability(const uint32_t* w, size_t words) {
-	for (size_t at = 5; at < words;) {
-		uint32_t n = w[at] >> 16, op = w[at] & 0xffff;
-		if (!n) break;
-		if (op == 17 && at + 1 < words && w[at + 1] == 6022) return true;
-		if (op == 54) break;
-		at += n;
-	}
-	return false;
-}
-
-W static VkResult o_vkCreateShaderModule(VkDevice d, const VkShaderModuleCreateInfo* info, const VkAllocationCallbacks* a,
-                                         VkShaderModule* out) {
-	(void)a;
-	char hex[65], path[4096];
-	sha256_hex(info->pCode, info->codeSize, hex);
-	stage = "creating shader module";
-	snprintf(stage_detail, sizeof(stage_detail), "(AMD module %.16s..)", hex);
-	snprintf(path, sizeof(path), "%s/%s.spv", opt.prepared, hex);
-	VkShaderModuleCreateInfo replaced = *info;
-	uint32_t* code = NULL;
-	FILE* f = fopen(path, "rb");
-	if (f) {
-		fseek(f, 0, SEEK_END);
-		long n = ftell(f);
-		fseek(f, 0, SEEK_SET);
-		code = malloc((size_t)n);
-		if (n <= 0 || n % 4 || fread(code, 1, (size_t)n, f) != (size_t)n) { fprintf(stderr, "bad prepared module %s\n", path); exit(4); }
-		fclose(f);
-		replaced.pCode = code;
-		replaced.codeSize = (size_t)n;
-		substituted++;
-	} else {
-		passed_through++;
-	}
-	VkResult r = ((PFN_vkCreateShaderModule)VkThunkReal("vkCreateShaderModule"))(d, &replaced, NULL, out);
-	if (r == VK_SUCCESS) {
-		if (module_count == module_cap) {
-			module_cap = module_cap ? module_cap * 2 : 512;
-			modules = realloc(modules, module_cap * sizeof(*modules));
-		}
-		ModuleInfo* added = &modules[module_count++];
-		*added = (ModuleInfo){*out, has_matrix_capability(replaced.pCode, replaced.codeSize / 4), code != NULL, {0}};
-		memcpy(added->hash, hex, 16);
-	} else {
-		fprintf(stderr, "vkCreateShaderModule failed (%d) for AMD module %s\n", r, hex);
-	}
-	free(code);
-	return r;
-}
-
-// Newest first: AMD destroys modules after building their pipelines, so the driver hands the same handle out again.
-static const ModuleInfo* module_info(VkShaderModule m) {
-	for (size_t i = module_count; i-- > 0;) if (modules[i].module == m) return &modules[i];
-	return NULL;
-}
-static bool module_is_matrix(VkShaderModule m) {
-	const ModuleInfo* info = module_info(m);
-	return info && info->matrix;
-}
-
-// Matrix programs run with full subgroups (as the native FSR 4 upscaler requires on RADV); AMD's runtime asks only
-// for subgroup size 32.
-W static VkResult o_vkCreateComputePipelines(VkDevice d, VkPipelineCache cache, uint32_t n, const VkComputePipelineCreateInfo* infos,
-                                             const VkAllocationCallbacks* a, VkPipeline* out) {
-	(void)a;
-	VkComputePipelineCreateInfo* copy = malloc(n * sizeof(*copy));
-	memcpy(copy, infos, n * sizeof(*copy));
-	bool matrix = false;
-	for (uint32_t i = 0; i < n; i++)
-		if (module_is_matrix(copy[i].stage.module)) {
-			matrix = true;
-			if (opt.full_subgroups) {
-				copy[i].stage.flags |= VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT;
-				full_subgroup_pipelines++;
-			}
-		}
-	stage = "compiling pipeline";
-	const ModuleInfo* shader = module_info(copy[0].stage.module);
-	snprintf(stage_detail, sizeof(stage_detail), "%u: %s%s, module %s (%s)", pipelines_created + 1, copy[0].stage.pName, matrix ? " (FP8 matrix)" : "",
-	         shader ? shader->hash : "?", shader && shader->replaced ? "prepared" : "as shipped");
-	printf("compiling pipeline %s\n", stage_detail);
-	fflush(stdout);
-	double start = now_ms();
-	VkResult r = ((PFN_vkCreateComputePipelines)VkThunkReal("vkCreateComputePipelines"))(d, cache, n, copy, NULL, out);
-	double ms = now_ms() - start;
-	pipeline_ms += ms;
-	pipelines_created += n;
-	if (ms > 2000) printf("  (that pipeline took %.1f s)\n", ms / 1000);
-	stage = "AMD context creation";
-	stage_detail[0] = 0;
-	if (r != VK_SUCCESS) {
-		pipeline_failures++;
-		for (uint32_t i = 0; i < n; i++) fprintf(stderr, "vkCreateComputePipelines failed (%d): entry %s\n", r, copy[i].stage.pName);
-	}
-	free(copy);
-	return r;
-}
-
-// AMD's Windows provider expects a device LUID; Linux drivers have none. A synthetic one is reported to it.
-W static void o_vkGetPhysicalDeviceProperties2(VkPhysicalDevice p, VkPhysicalDeviceProperties2* props) {
-	vkGetPhysicalDeviceProperties2(p, props);
-	for (VkBaseOutStructure* s = props->pNext; s; s = s->pNext)
-		if (s->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES) {
-			VkPhysicalDeviceIDProperties* id = (void*)s;
-			if (!id->deviceLUIDValid) {
-				memset(id->deviceLUID, 3, VK_LUID_SIZE);
-				id->deviceLUIDValid = VK_TRUE;
-				id->deviceNodeMask = 1;
-			}
-		}
-}
-
-W static void* dll_get_device_proc_addr(VkDevice d, const char* name) {
-	(void)d;
-	void* f = VkThunkLookup(name);
-	if (!f) fprintf(stderr, "AMD runtime asked for %s: not provided by the driver\n", name);
-	return f;
-}
-
-static void* import_resolver(const char* dll, const char* name) {
-	if (strcmp(dll, "vulkan-1.dll")) return NULL;
-	if (!strcmp(name, "vkGetDeviceProcAddr")) return (void*)dll_get_device_proc_addr;
-	void* f = VkThunkLookup(name);
-	if (!f) fprintf(stderr, "vulkan-1.dll!%s: not provided by the driver\n", name);
-	return f;
-}
-
 // ------------------------------------------------------------------------------------------------ device
 typedef struct Feature { const char* name; VkBool32* value; } Feature;
 
@@ -317,7 +143,7 @@ static void inject_fault(void) {
 		int* volatile null_page = NULL;
 		*null_page = 1;
 	}
-	if (!strcmp(fault, "fatal")) { fprintf(stderr, "pehost: injected\n"); exit(PE_EXIT_FATAL); }
+	if (!strcmp(fault, "fatal")) PeFatal("injected");
 	if (!strcmp(fault, "hang-hard")) signal(SIGTERM, SIG_IGN);
 	if (!strncmp(fault, "hang", 4)) for (;;) pause();
 }
@@ -452,11 +278,6 @@ static void create_device(void) {
 	D(vkDeviceWaitIdle); D(vkResetCommandBuffer);
 	vkGetDeviceQueue(device, queue_family, 0, &queue);
 	vkGetPhysicalDeviceMemoryProperties(gpu, &memory_props);
-	printf("Vulkan thunks bound: %u of %u commands\n", VkThunksBind(gipa, instance, gdpa, device), VkThunkCount());
-	VkThunkOverride("vkCreateShaderModule", (void*)o_vkCreateShaderModule);
-	VkThunkOverride("vkCreateComputePipelines", (void*)o_vkCreateComputePipelines);
-	VkThunkOverride("vkGetPhysicalDeviceProperties2", (void*)o_vkGetPhysicalDeviceProperties2);
-	VkThunkOverride("vkGetPhysicalDeviceProperties2KHR", (void*)o_vkGetPhysicalDeviceProperties2);
 }
 
 static uint32_t memory_type(uint32_t bits, VkMemoryPropertyFlags want) {
@@ -466,14 +287,18 @@ static uint32_t memory_type(uint32_t bits, VkMemoryPropertyFlags want) {
 	exit(4);
 }
 
-typedef struct Image { VkImage image; VkFormat format; uint32_t w, h, bpp; VkImageLayout layout; } Image;
-static Image make_image(VkFormat format, uint32_t w, uint32_t h, uint32_t bpp) {
-	Image im = {.format = format, .w = w, .h = h, .bpp = bpp, .layout = VK_IMAGE_LAYOUT_UNDEFINED};
+typedef struct Image { VkImage image; VkFormat format; uint32_t w, h, bpp; VkImageLayout layout; VkImageUsageFlags usage; } Image;
+static VkImageAspectFlags barrier_aspect(VkFormat f) {
+	return f == VK_FORMAT_D32_SFLOAT_S8_UINT ? VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
+	       : f == VK_FORMAT_D32_SFLOAT       ? VK_IMAGE_ASPECT_DEPTH_BIT
+	                                         : VK_IMAGE_ASPECT_COLOR_BIT;
+}
+#define DISPLAY_USAGE (VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT)
+static Image make_image(VkFormat format, uint32_t w, uint32_t h, uint32_t bpp, VkImageUsageFlags usage) {
+	Image im = {.format = format, .w = w, .h = h, .bpp = bpp, .layout = VK_IMAGE_LAYOUT_UNDEFINED, .usage = usage};
 	VkImageCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = VK_IMAGE_TYPE_2D, .format = format,
 	                        .extent = {w, h, 1}, .mipLevels = 1, .arrayLayers = 1, .samples = VK_SAMPLE_COUNT_1_BIT,
-	                        .tiling = VK_IMAGE_TILING_OPTIMAL,
-	                        .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-	                                 VK_IMAGE_USAGE_TRANSFER_DST_BIT};
+	                        .tiling = VK_IMAGE_TILING_OPTIMAL, .usage = usage};
 	CHECK(vkCreateImage(device, &ci, NULL, &im.image));
 	VkMemoryRequirements req;
 	vkGetImageMemoryRequirements(device, im.image, &req);
@@ -502,31 +327,45 @@ static void transition(VkCommandBuffer cb, Image* im, VkImageLayout to, VkAccess
 	VkImageMemoryBarrier b = {.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, .srcAccessMask = src, .dstAccessMask = dst,
 	                          .oldLayout = im->layout, .newLayout = to, .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 	                          .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED, .image = im->image,
-	                          .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
+	                          .subresourceRange = {barrier_aspect(im->format), 0, 1, 0, 1}};
 	vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, NULL, 0, NULL, 1, &b);
 	im->layout = to;
 }
-static uint32_t ffx_format(VkFormat f) {
-	switch (f) {
-	case VK_FORMAT_R8G8B8A8_UNORM: return FFX_API_SURFACE_FORMAT_R8G8B8A8_UNORM;
-	case VK_FORMAT_R32_SFLOAT: return FFX_API_SURFACE_FORMAT_R32_FLOAT;
-	case VK_FORMAT_R16G16_SFLOAT: return FFX_API_SURFACE_FORMAT_R16G16_FLOAT;
-	default: exit(4);
+static FgRtImage rt_image(const Image* im) { return (FgRtImage){im->image, im->format, im->w, im->h, im->usage, im->layout}; }
+// The scene is drawn as RGBA8; the device's image may be laid out otherwise.
+static void to_device(VkFormat format, uint8_t* pixels, size_t bytes) {
+	for (size_t i = 0; i < bytes; i += 4) {
+		uint8_t* p = pixels + i;
+		if (format == VK_FORMAT_B8G8R8A8_UNORM) {
+			uint8_t r = p[0];
+			p[0] = p[2];
+			p[2] = r;
+		} else if (format == VK_FORMAT_A2B10G10R10_UNORM_PACK32) {
+			uint32_t v = (uint32_t)p[0] * 1023 / 255 | (uint32_t)p[1] * 1023 / 255 << 10 | (uint32_t)p[2] * 1023 / 255 << 20 | 3u << 30;
+			memcpy(p, &v, 4);
+		}
 	}
 }
-static struct FfxApiResource resource(const Image* im, bool written) {
-	struct FfxApiResource r;
-	memset(&r, 0, sizeof(r));
-	r.resource = (void*)im->image;
-	r.description.type = FFX_API_RESOURCE_TYPE_TEXTURE2D;
-	r.description.format = ffx_format(im->format);
-	r.description.width = im->w;
-	r.description.height = im->h;
-	r.description.depth = 1;
-	r.description.mipCount = 1;
-	r.description.usage = written ? FFX_API_RESOURCE_USAGE_UAV : FFX_API_RESOURCE_USAGE_READ_ONLY;
-	r.state = written ? FFX_API_RESOURCE_STATE_UNORDERED_ACCESS : FFX_API_RESOURCE_STATE_COMPUTE_READ;
-	return r;
+static void from_device(VkFormat format, const uint8_t* in, uint8_t* out, size_t bytes) {
+	for (size_t i = 0; i < bytes; i += 4) {
+		const uint8_t* p = in + i;
+		uint8_t*       q = out + i;
+		if (format == VK_FORMAT_B8G8R8A8_UNORM) {
+			q[0] = p[2];
+			q[1] = p[1];
+			q[2] = p[0];
+			q[3] = p[3];
+		} else if (format == VK_FORMAT_A2B10G10R10_UNORM_PACK32) {
+			uint32_t v;
+			memcpy(&v, p, 4);
+			q[0] = (uint8_t)((v & 1023) * 255 / 1023);
+			q[1] = (uint8_t)((v >> 10 & 1023) * 255 / 1023);
+			q[2] = (uint8_t)((v >> 20 & 1023) * 255 / 1023);
+			q[3] = 255;
+		} else {
+			memcpy(q, p, 4);
+		}
+	}
 }
 
 // ------------------------------------------------------------------------------------------------ synthetic scene
@@ -596,8 +435,9 @@ static void render_depth_motion(double t, float* depth, uint16_t* motion) {
 				object_rect(&objects[k], t, opt.rw, opt.rh, &x0, &y0, &x1, &y1);
 				if (x + 0.5 < x0 || x + 0.5 >= x1 || y + 0.5 < y0 || y + 0.5 >= y1 || objects[k].z >= z) continue;
 				z = objects[k].z;
-				mx = -objects[k].vx * (float)opt.rw / (float)opt.dw;
-				my = -objects[k].vy * (float)opt.rh / (float)opt.dh;
+				// (--game-inputs: as the game's, UV units along the motion. Otherwise render pixels towards the previous position.)
+				mx = opt.game_inputs ? objects[k].vx / (float)opt.dw : -objects[k].vx * (float)opt.rw / (float)opt.dw;
+				my = opt.game_inputs ? objects[k].vy / (float)opt.dh : -objects[k].vy * (float)opt.rh / (float)opt.dh;
 			}
 			depth[i] = near / z; // reversed-Z, infinite far plane
 			_Float16 hx = (_Float16)mx, hy = (_Float16)my;
@@ -648,76 +488,43 @@ static void write_ppm(const char* name, const uint8_t* rgba) {
 static int compare_double(const void* a, const void* b) { double x = *(const double*)a, y = *(const double*)b; return (x > y) - (x < y); }
 
 // ------------------------------------------------------------------------------------------------ AMD runtime
-typedef W ffxReturnCode_t (*FnCreate)(ffxContext*, ffxCreateContextDescHeader*, const ffxAllocationCallbacks*);
-typedef W ffxReturnCode_t (*FnDestroy)(ffxContext*, const ffxAllocationCallbacks*);
-typedef W ffxReturnCode_t (*FnConfigure)(ffxContext*, const ffxConfigureDescHeader*);
-typedef W ffxReturnCode_t (*FnQuery)(ffxContext*, ffxQueryDescHeader*);
-typedef W ffxReturnCode_t (*FnDispatch)(ffxContext*, const ffxDispatchDescHeader*);
+static void wait_idle(void) { vkDeviceWaitIdle(device); }
 
-W static void message(uint32_t type, const uint16_t* text) {
-	char b[1024];
-	size_t i = 0;
-	for (; text && text[i] && i + 1 < sizeof(b); i++) b[i] = text[i] < 128 ? (char)text[i] : '?';
-	b[i] = 0;
-	fprintf(stderr, "AMD runtime message %u: %s\n", type, b);
+static int failed_status(void) {
+	fprintf(stderr, "AMD's runtime is unavailable: %s\n", FgRtReason());
+	return FgRtStopped() ? PE_EXIT_FATAL : FgRtNotOffered() ? 5 : 4;
 }
 
-static int run(void* unused) {
-	(void)unused;
+static int run(void) {
 	install_crash_reports();
 	stage = "creating the Vulkan device";
 	create_device();
-	PeSetImportResolver(import_resolver);
-	PeModule* m = PeLoad(opt.dll);
-	PeImageRange(m, &dll_base, &dll_size);
-	if (!PeAttach(m)) { fprintf(stderr, "DllMain failed\n"); return 4; }
-	FnCreate create = (FnCreate)PeExport(m, "ffxCreateContext");
-	FnDestroy destroy = (FnDestroy)PeExport(m, "ffxDestroyContext");
-	FnConfigure configure = (FnConfigure)PeExport(m, "ffxConfigure");
-	FnQuery query = (FnQuery)PeExport(m, "ffxQuery");
-	FnDispatch dispatch = (FnDispatch)PeExport(m, "ffxDispatch");
-	VkDeviceContext dc = {device, gpu, (PFN_vkGetDeviceProcAddr)(void*)dll_get_device_proc_addr};
-	uint64_t count = 8, ids[8] = {0};
-	const char* names[8] = {0};
-	struct ffxQueryDescGetVersions versions = {.header = {FFX_API_QUERY_DESC_TYPE_GET_VERSIONS, NULL}, .createDescType = FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATION,
-	                                           .device = &dc, .outputCount = &count, .versionIds = ids, .versionNames = names};
-	if (query(NULL, &versions.header) || count > 8) { fprintf(stderr, "version query failed\n"); return 4; }
-	uint64_t chosen = 0;
-	for (uint64_t i = 0; i < count; i++) {
-		printf("AMD provider offered: %s\n", names[i] ? names[i] : "?");
-		if (names[i] && !strcmp(names[i], opt.provider)) chosen = ids[i];
-	}
+	FgRtConfig config = {.dll = opt.dll, .prepared = opt.prepared, .provider = opt.provider, .instance = instance, .physical_device = gpu, .device = device,
+	                     .get_instance_proc_addr = gipa, .get_device_proc_addr = gdpa, .minimum_address = opt.guest_layout ? GUEST_END : 0,
+	                     .full_subgroups = opt.full_subgroups, .hudless_desc = opt.hudless_desc, .verbose = true, .probe = opt.probe,
+	                     .on_thread_start = install_crash_reports, .wait_idle = wait_idle};
+	FgRtStart(&config);
+	FgRtWaitLoaded();
+	if (FgRtGetState() == FG_RT_FAILED) return failed_status();
+	FgRtStats loaded = FgRtGetStats();
+	dll_base = loaded.image_base;
+	dll_size = loaded.image_size;
+	printf("Vulkan thunks bound: %u of %u commands\n", loaded.thunks_bound, loaded.thunks_total);
+	const char* names[8];
+	unsigned    name_count = 8;
+	FgRtProviders(names, &name_count);
+	for (unsigned i = 0; i < name_count; i++) printf("AMD provider offered: %s\n", names[i] ? names[i] : "?");
 	if (opt.probe) return 0;
-	if (!chosen) { fprintf(stderr, "AMD's runtime does not offer frame generation %s on this device\n", opt.provider); return 5; }
 
-	struct ffxCreateBackendVKDesc backend = {.header = {FFX_API_CREATE_CONTEXT_DESC_TYPE_BACKEND_VK, NULL}, .deviceContext = dc};
-	struct ffxOverrideVersion override = {.header = {FFX_API_DESC_TYPE_OVERRIDE_VERSION, &backend.header}, .versionId = chosen};
-	struct ffxCreateContextDescFrameGenerationVersion version = {.header = {FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATION_VERSION, &override.header},
-	                                                             .version = FFX_FRAMEGENERATION_VERSION};
-	struct ffxCreateContextDescFrameGenerationHudless hudless_desc = {.header = {FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATION_HUDLESS, &version.header},
-	                                                                  .hudlessBackBufferFormat = FFX_API_SURFACE_FORMAT_R8G8B8A8_UNORM};
-	struct ffxCreateContextDescFrameGeneration desc = {.header = {FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATION, &hudless_desc.header},
-	                                                   .flags = FFX_FRAMEGENERATION_ENABLE_DEPTH_INVERTED | FFX_FRAMEGENERATION_ENABLE_DEPTH_INFINITE,
-	                                                   .displaySize = {opt.dw, opt.dh}, .maxRenderSize = {opt.rw, opt.rh},
-	                                                   .backBufferFormat = FFX_API_SURFACE_FORMAT_R8G8B8A8_UNORM};
-	ffxContext context = NULL;
-	stage = "AMD context creation";
-	double create_start = now_ms();
-	ffxReturnCode_t rc = create(&context, &desc.header, NULL);
-	printf("AMD context creation took %.1f s (%u pipelines, %.1f s compiling)\n", (now_ms() - create_start) / 1000, pipelines_created,
-	       pipeline_ms / 1000);
-	printf("create=%u; AMD shaders: %u replaced by prepared ones, %u used as shipped; %u matrix pipelines with full subgroups; %u pipeline failures\n",
-	       rc, substituted, passed_through, full_subgroup_pipelines, pipeline_failures);
-	if (rc || !context || pipeline_failures) return 4;
-	struct ffxConfigureDescGlobalDebug debug = {.header = {FFX_API_CONFIGURE_DESC_TYPE_GLOBALDEBUG, NULL}, .fpMessage = (ffxApiMessage)(void*)message,
-	                                            .debugLevel = 0xffffffffu};
-	configure(&context, &debug.header);
-
-	Image present[2] = {make_image(VK_FORMAT_R8G8B8A8_UNORM, opt.dw, opt.dh, 4), make_image(VK_FORMAT_R8G8B8A8_UNORM, opt.dw, opt.dh, 4)};
-	Image hudless = make_image(VK_FORMAT_R8G8B8A8_UNORM, opt.dw, opt.dh, 4);
-	Image output = make_image(VK_FORMAT_R8G8B8A8_UNORM, opt.dw, opt.dh, 4);
-	Image depth = make_image(VK_FORMAT_R32_SFLOAT, opt.rw, opt.rh, 4);
-	Image motion = make_image(VK_FORMAT_R16G16_SFLOAT, opt.rw, opt.rh, 4);
+	const VkImageUsageFlags color_usage = opt.game_inputs ? VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT
+	                                                       : DISPLAY_USAGE;
+	const VkImageUsageFlags depth_usage = opt.game_inputs ? VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT : DISPLAY_USAGE;
+	const VkImageUsageFlags motion_usage = opt.game_inputs ? VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT : DISPLAY_USAGE;
+	Image present[2] = {make_image(opt.color_format, opt.dw, opt.dh, 4, color_usage), make_image(opt.color_format, opt.dw, opt.dh, 4, color_usage)};
+	Image hudless = make_image(opt.color_format, opt.dw, opt.dh, 4, color_usage);
+	Image output = make_image(opt.color_format, opt.dw, opt.dh, 4, DISPLAY_USAGE);
+	Image depth = make_image(opt.depth_format, opt.rw, opt.rh, 4, depth_usage);
+	Image motion = make_image(VK_FORMAT_R16G16_SFLOAT, opt.rw, opt.rh, 4, motion_usage);
 	size_t dbytes = (size_t)opt.dw * opt.dh * 4, rbytes = (size_t)opt.rw * opt.rh * 4;
 	uint8_t *upload, *readback;
 	VkBuffer upload_buffer = make_buffer(2 * dbytes + 2 * rbytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, (void**)&upload);
@@ -739,7 +546,8 @@ static int run(void* unused) {
 	VkPhysicalDeviceProperties props;
 	vkGetPhysicalDeviceProperties(gpu, &props);
 
-	uint8_t *truth = malloc(dbytes), *previous = malloc(dbytes), *current = malloc(dbytes), *blend = malloc(dbytes);
+	uint8_t *truth = malloc(dbytes), *previous = malloc(dbytes), *current = malloc(dbytes), *blend = malloc(dbytes), *generated = malloc(dbytes);
+	bool     reset_next = true, runtime_gone = false;
 	double* gpu_ms = calloc(opt.frames + opt.timing_frames, sizeof(double));
 	double sums[4][3] = {{0}};
 	double margin_sum = 0, margin_worst = INFINITY;
@@ -759,11 +567,24 @@ static int run(void* unused) {
 		stage = "recording a frame";
 		snprintf(stage_detail, sizeof(stage_detail), "%u", f);
 		if (scoring) {
+			if (opt.resize_at && f == opt.resize_at) {
+				// A new display size, as a window resize gives: AMD's context has to be made again, on a running device.
+				printf("frame %u: display %ux%u -> %ux%u\n", f, opt.dw, opt.dh, opt.resize_w, opt.resize_h);
+				opt.dw = opt.resize_w;
+				opt.dh = opt.resize_h;
+				dbytes = (size_t)opt.dw * opt.dh * 4;
+				present[0] = make_image(opt.color_format, opt.dw, opt.dh, 4, color_usage);
+				present[1] = make_image(opt.color_format, opt.dw, opt.dh, 4, color_usage);
+				hudless = make_image(opt.color_format, opt.dw, opt.dh, 4, color_usage);
+				output = make_image(opt.color_format, opt.dw, opt.dh, 4, DISPLAY_USAGE);
+				reset_next = true;
+			}
 			render_color(f, true, upload);
 			render_color(f, false, upload + dbytes);
 			render_depth_motion(f, (float*)(upload + 2 * dbytes), (uint16_t*)(upload + 2 * dbytes + rbytes));
 			memcpy(previous, current, dbytes);
 			memcpy(current, upload, dbytes);
+			to_device(opt.color_format, upload, 2 * dbytes);
 		}
 		VkCommandBufferBeginInfo bi = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT};
 		CHECK(vkResetCommandBuffer(cb, 0));
@@ -773,58 +594,38 @@ static int run(void* unused) {
 		VkDeviceSize offsets[4] = {0, dbytes, 2 * dbytes, 2 * dbytes + rbytes};
 		for (int i = 0; i < 4; i++) {
 			transition(cb, inputs[i], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
-			VkBufferImageCopy region = {.bufferOffset = offsets[i], .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+			VkImageAspectFlags copy_aspect = barrier_aspect(inputs[i]->format) & VK_IMAGE_ASPECT_DEPTH_BIT ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
+			VkBufferImageCopy region = {.bufferOffset = offsets[i], .imageSubresource = {copy_aspect, 0, 0, 1},
 			                            .imageExtent = {inputs[i]->w, inputs[i]->h, 1}};
 			vkCmdCopyBufferToImage(cb, upload_buffer, inputs[i]->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
-			transition(cb, inputs[i], VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
+			// (--game-inputs: the finished frame is general, as the presenter leaves it.)
+			transition(cb, inputs[i], opt.game_inputs && i == 0 ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
 		}
 		if (output.layout != VK_IMAGE_LAYOUT_GENERAL)
 			transition(cb, &output, VK_IMAGE_LAYOUT_GENERAL, 0, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
 		vkCmdWriteTimestamp(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, queries, 0);
 
-		uint64_t frame_id = f + 1;
-		struct ffxConfigureDescFrameGeneration config;
-		memset(&config, 0, sizeof(config));
-		config.header.type = FFX_API_CONFIGURE_DESC_TYPE_FRAMEGENERATION;
-		config.frameGenerationEnabled = true;
-		config.flags = FFX_FRAMEGENERATION_FLAG_NO_SWAPCHAIN_CONTEXT_NOTIFY;
-		config.HUDLessColor = resource(&hudless, false);
-		config.generationRect = (struct FfxApiRect2D){0, 0, (int32_t)opt.dw, (int32_t)opt.dh};
-		config.frameID = frame_id;
-		if ((rc = configure(&context, &config.header))) { fprintf(stderr, "configure=%u\n", rc); return 4; }
-		struct ffxDispatchDescFrameGenerationPrepareV2 prepare;
-		memset(&prepare, 0, sizeof(prepare));
-		prepare.header.type = FFX_API_DISPATCH_DESC_TYPE_FRAMEGENERATION_PREPARE_V2;
-		prepare.frameID = frame_id;
-		prepare.commandList = cb;
-		prepare.renderSize = (struct FfxApiDimensions2D){opt.rw, opt.rh};
-		prepare.motionVectorScale = (struct FfxApiFloatCoords2D){1.0f, 1.0f};
-		prepare.frameTimeDelta = 16.67f;
-		prepare.reset = f == 0;
-		prepare.cameraNear = 0.1f;
-		prepare.cameraFar = 1000.0f;
-		prepare.cameraFovAngleVertical = 1.0f;
-		prepare.viewSpaceToMetersFactor = 1.0f;
-		prepare.depth = resource(&depth, false);
-		prepare.motionVectors = resource(&motion, false);
-		const float up[3] = {0, 1, 0}, right[3] = {1, 0, 0}, forward[3] = {0, 0, -1};
-		memcpy(prepare.cameraUp, up, sizeof(up));
-		memcpy(prepare.cameraRight, right, sizeof(right));
-		memcpy(prepare.cameraForward, forward, sizeof(forward));
-		if ((rc = dispatch(&context, &prepare.header))) { fprintf(stderr, "prepare=%u\n", rc); return 4; }
-		struct ffxDispatchDescFrameGeneration gen;
-		memset(&gen, 0, sizeof(gen));
-		gen.header.type = FFX_API_DISPATCH_DESC_TYPE_FRAMEGENERATION;
-		gen.commandList = cb;
-		gen.presentColor = resource(color, false);
-		gen.outputs[0] = resource(&output, true);
-		gen.numGeneratedFrames = 1;
-		gen.reset = f == 0;
-		gen.backbufferTransferFunction = FFX_API_BACKBUFFER_TRANSFER_FUNCTION_SRGB;
-		gen.minMaxLuminance[1] = 1000.0f;
-		gen.generationRect = (struct FfxApiRect2D){0, 0, (int32_t)opt.dw, (int32_t)opt.dh};
-		gen.frameID = frame_id;
-		if ((rc = dispatch(&context, &gen.header))) { fprintf(stderr, "generate=%u\n", rc); return 4; }
+		FgRtFrame frame = {.command = cb, .color = rt_image(color), .depth = rt_image(&depth), .motion = rt_image(&motion), .output = rt_image(&output),
+		                   .rect = {0, 0, (int32_t)opt.dw, (int32_t)opt.dh},
+		                   .motion_scale = {opt.game_inputs ? -(float)opt.rw : 1.0f, opt.game_inputs ? -(float)opt.rh : 1.0f},
+		                   .frame_ms = 16.67f, .near_plane = 0.1f, .fov_y = 1.0f, .up = {0, 1, 0}, .right = {1, 0, 0}, .forward = {0, 0, -1},
+		                   .reset = reset_next, .pq = opt.pq};
+		if (opt.hudless_image) frame.hudless = rt_image(&hudless);
+		const char* fault = getenv("FSR4FG_INJECT");
+		if (f == 2 && fault && !strcmp(fault, "fatal-frame")) FgRtInjectStop();
+		FgRtResult made;
+		// (The first frames find the context still being made: the game shows them without a generated one.)
+		while ((made = FgRtGenerate(&frame)) == FG_RT_NOT_YET) {
+			struct timespec tick = {0, 5000000};
+			nanosleep(&tick, NULL);
+		}
+		if (made == FG_RT_UNAVAILABLE) {
+			// As the game goes on without AMD's runtime: this thread is unharmed and the device still works.
+			printf("frame %u: AMD's runtime is gone (%s), going on without it\n", f, FgRtReason());
+			fflush(stdout);
+			runtime_gone = true;
+		}
+		reset_next = false;
 		vkCmdWriteTimestamp(cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, queries, 1);
 
 		transition(cb, &output, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
@@ -841,12 +642,23 @@ static int run(void* unused) {
 		uint64_t ts[2];
 		CHECK(vkGetQueryPoolResults(device, queries, 0, 2, sizeof(ts), ts, 8, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT));
 		gpu_ms[f] = (double)((ts[1] - ts[0]) & timestamp_mask) * props.limits.timestampPeriod / 1e6;
-		if (f == 0) { printf("frame 0 (reset): GPU %.3f ms (includes first use)\n", gpu_ms[f]); fflush(stdout); continue; }
+		if (f == 0) {
+			FgRtStats made_stats = FgRtGetStats();
+			printf("AMD context creation took %.1f s (%u pipelines, %.1f s compiling)\n", made_stats.create_seconds, made_stats.pipelines, made_stats.compile_seconds);
+			printf("provider %s; AMD shaders: %u replaced by prepared ones, %u used as shipped; %u matrix pipelines with full subgroups; %u pipeline failures\n",
+			       FgRtActiveProvider(), made_stats.replaced, made_stats.as_shipped, made_stats.matrix_pipelines, made_stats.pipeline_failures);
+			printf("frame 0 (reset): GPU %.3f ms (includes first use)\n", gpu_ms[f]);
+			fflush(stdout);
+			continue;
+		}
+		if (runtime_gone) continue;
+		if (opt.resize_at && (f == opt.resize_at || f == opt.resize_at + 1)) continue; // (before and at the reset: nothing to score)
 		if (!scoring) continue;
 		render_color(f - 0.5, true, truth);
 		for (size_t i = 0; i < dbytes; i++) blend[i] = (uint8_t)((previous[i] + current[i] + 1) / 2);
+		from_device(opt.color_format, readback, generated, dbytes);
 		double g[3], rpt[3], bl[3], nx[3];
-		psnr(readback, truth, f - 0.5, g);
+		psnr(generated, truth, f - 0.5, g);
 		psnr(previous, truth, f - 0.5, rpt);
 		psnr(blend, truth, f - 0.5, bl);
 		psnr(current, truth, f - 0.5, nx);
@@ -862,7 +674,7 @@ static int run(void* unused) {
 			scored++;
 		}
 		if (f == opt.frames / 2 && !opt.no_pictures) {
-			write_ppm("generated.ppm", readback);
+			write_ppm("generated.ppm", generated);
 			write_ppm("exact-midpoint.ppm", truth);
 			write_ppm("blend.ppm", blend);
 			write_ppm("previous.ppm", previous);
@@ -870,11 +682,10 @@ static int run(void* unused) {
 	}
 	fclose(csv);
 	vkDeviceWaitIdle(device);
-	struct FfxApiEffectMemoryUsage usage = {0};
-	struct ffxQueryDescFrameGenerationGetGPUMemoryUsage mem = {.header = {FFX_API_QUERY_DESC_TYPE_FRAMEGENERATION_GPU_MEMORY_USAGE, NULL},
-	                                                           .gpuMemoryUsageFrameGeneration = &usage};
-	if (!query(&context, &mem.header)) printf("AMD runtime video memory: %.1f MB\n", usage.totalUsageInBytes / 1e6);
-	destroy(&context, NULL);
+	printf("AMD runtime video memory: %.1f MB\n", FgRtGetStats().memory_bytes / 1e6);
+	unsigned long gs = 0;
+	syscall(SYS_arch_prctl, ARCH_GET_GS, &gs);
+	printf("this thread's GS base: %#lx (AMD's code runs on its own thread)\n", gs);
 	if (scored) {
 		size_t n = opt.frames - 2;
 		double* t = malloc(n * sizeof(double));
@@ -901,6 +712,7 @@ static int run(void* unused) {
 		       t[n * 99 / 100], t[n - 1]);
 		free(t);
 	}
+	if (runtime_gone) return failed_status();
 	return 0;
 }
 
@@ -908,7 +720,6 @@ static int run(void* unused) {
 // What the emulator does on Linux at startup (src/kernel/memoryAddressSpace.inc): every free address of the guest's
 // range is taken, PROT_NONE. AMD's preferred base (0x180000000) is inside it, so the image gets relocated above it.
 #define GUEST_MIN 0x40000ull
-#define GUEST_END 0xFC00000000ull
 static void reserve_gap(uint64_t start, uint64_t end) {
 	if (start < GUEST_MIN) start = GUEST_MIN;
 	if (end > GUEST_END) end = GUEST_END;
@@ -934,7 +745,6 @@ static void reserve_guest_layout(void) {
 		if (taken[i].end > at) at = taken[i].end;
 	}
 	reserve_gap(at, GUEST_END);
-	PeSetMinimumAddress(GUEST_END);
 	printf("guest layout: %#llx..%#llx reserved, as the emulator does\n", GUEST_MIN, GUEST_END);
 }
 
@@ -943,7 +753,7 @@ static void reserve_guest_layout(void) {
 // no fallback inside the game could catch, so this process never touches Vulkan: it runs itself as a child, reads what
 // the child says and writes the verdict to STATE_DIR/self-test.json (0: pass, 1: fail, 2: could not test). A verdict
 // holds until the driver, GPU, AMD's DLL, the prepared programs or these rules change (--force tests anyway).
-#define SELF_TEST_RULES 1
+#define SELF_TEST_RULES 2
 #define SELF_TEST_FRAMES "6"
 #define SELF_TEST_DISPLAY "1280x720"
 #define SELF_TEST_RENDER "640x360"
@@ -1172,7 +982,7 @@ static int self_test(char* self) {
 		char seconds[16];
 		snprintf(seconds, sizeof(seconds), "%u", opt.self_test_timeout);
 		char* args[] = {self, (char*)opt.dll, (char*)opt.prepared, dir, "--organic", "--frames", SELF_TEST_FRAMES, "--display", SELF_TEST_DISPLAY,
-		                "--render", SELF_TEST_RENDER, "--guest-layout", "--no-pictures", NULL};
+		                "--render", SELF_TEST_RENDER, "--guest-layout", "--game-inputs", "--no-pictures", NULL};
 		printf("self-test: running AMD's runtime on %s\n", who.identity);
 		fflush(stdout);
 		ChildEnd end = run_child(args, opt.self_test_timeout, &run, &status);
@@ -1230,10 +1040,12 @@ static bool size(const char* s, uint32_t* w, uint32_t* h) { return sscanf(s, "%u
 
 int main(int argc, char** argv) {
 	setvbuf(stdout, NULL, _IOLBF, 0);
-	opt = (Options){.dw = 2560, .dh = 1440, .rw = 1280, .rh = 720, .frames = 12, .hud = true, .full_subgroups = true, .provider = "4.0.2", .self_test_timeout = 120};
+	opt = (Options){.dw = 2560, .dh = 1440, .rw = 1280, .rh = 720, .frames = 12, .hud = true, .full_subgroups = true, .provider = "4.0.2", .self_test_timeout = 120,
+	               .hudless_image = true, .hudless_desc = true, .color_format = VK_FORMAT_R8G8B8A8_UNORM, .depth_format = VK_FORMAT_R32_SFLOAT};
 	if (argc < 4) {
 		fprintf(stderr, "usage: fsr4fg-gpu DLL PREPARED_DIR NEW_OUTPUT_DIR [--display WxH] [--render WxH] [--frames N] [--no-hud] "
 		                "[--no-full-subgroups] [--provider 4.0.2|3.1.6] [--probe] [--organic] [--timing-frames N] [--guest-layout] [--no-pictures]\n"
+		                "       [--game-inputs] [--format rgba8|bgra8|a2b10g10r10] [--depth r32|d32|d32s8] [--pq] [--no-hudless] [--no-hudless-desc] [--resize-at N:WxH]\n"
 		                "       fsr4fg-gpu DLL PREPARED_DIR STATE_DIR --self-test [--force] [--self-test-timeout SECONDS]\n");
 		return 2;
 	}
@@ -1250,6 +1062,24 @@ int main(int argc, char** argv) {
 		else if (!strcmp(argv[i], "--probe")) opt.probe = true;
 		else if (!strcmp(argv[i], "--organic")) opt.organic = true;
 		else if (!strcmp(argv[i], "--guest-layout")) opt.guest_layout = true;
+		else if (!strcmp(argv[i], "--game-inputs")) {
+			// What the emulator's presenter hands over: BGRA8, a D32S8 depth copy, a general color image, UV motion vectors.
+			opt.game_inputs = true;
+			opt.color_format = VK_FORMAT_B8G8R8A8_UNORM;
+			opt.depth_format = VK_FORMAT_D32_SFLOAT_S8_UINT;
+		}
+		else if (!strcmp(argv[i], "--format") && i + 1 < argc) {
+			const char* v = argv[++i];
+			opt.color_format = !strcmp(v, "rgba8") ? VK_FORMAT_R8G8B8A8_UNORM : !strcmp(v, "bgra8") ? VK_FORMAT_B8G8R8A8_UNORM : VK_FORMAT_A2B10G10R10_UNORM_PACK32;
+		}
+		else if (!strcmp(argv[i], "--depth") && i + 1 < argc) {
+			const char* v = argv[++i];
+			opt.depth_format = !strcmp(v, "r32") ? VK_FORMAT_R32_SFLOAT : !strcmp(v, "d32") ? VK_FORMAT_D32_SFLOAT : VK_FORMAT_D32_SFLOAT_S8_UINT;
+		}
+		else if (!strcmp(argv[i], "--pq")) opt.pq = true;
+		else if (!strcmp(argv[i], "--no-hudless")) opt.hudless_image = false;
+		else if (!strcmp(argv[i], "--no-hudless-desc")) opt.hudless_desc = false;
+		else if (!strcmp(argv[i], "--resize-at") && i + 1 < argc && sscanf(argv[i + 1], "%u:%ux%u", &opt.resize_at, &opt.resize_w, &opt.resize_h) == 3) i++;
 		else if (!strcmp(argv[i], "--no-pictures")) opt.no_pictures = true;
 		else if (!strcmp(argv[i], "--identity")) opt.identity = true;
 		else if (!strcmp(argv[i], "--self-test")) opt.self_test = true;
@@ -1269,5 +1099,5 @@ int main(int argc, char** argv) {
 	if (opt.guest_layout) reserve_guest_layout();
 	printf("FSR frame generation %s GPU test: AMD's runtime on this Linux Vulkan driver, %ux%u (render %ux%u), %u frames\n",
 	       opt.provider, opt.dw, opt.dh, opt.rw, opt.rh, opt.frames);
-	return PeRunOnWindowsThread(run, NULL);
+	return run();
 }

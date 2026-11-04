@@ -47,7 +47,7 @@ wrapper.write_text('#!/usr/bin/env bash\nset -euo pipefail\nhere="$(cd -- "$(dir
 wrapper.chmod(0o755)
 source = out / "source/tools/fsr4fg-vk"
 source.mkdir(parents=True)
-for name in ("pehost.c", "pehost.h", "gpu_fg.c", "vk_thunks.h", "gen_vk_thunks.py", "build-gpu.sh", "package-fg-test.py"):
+for name in ("pehost.c", "pehost.h", "fg_runtime.c", "fg_runtime.h", "gpu_fg.c", "vk_thunks.h", "gen_vk_thunks.py", "build-gpu.sh", "package-fg-test.py"):
     shutil.copy2(here / name, source / name)
 shutil.copytree(here / "ffx", source / "ffx")
 (out / "SOURCE_COMMIT").write_text(subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True))

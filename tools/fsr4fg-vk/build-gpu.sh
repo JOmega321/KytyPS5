@@ -10,4 +10,4 @@ gen=$(mktemp -d)
 trap 'rm -rf "$gen"' EXIT
 python3 -I "$here/gen_vk_thunks.py" "$headers" "$gen/vk_thunks.c"
 "${CC:-gcc}" -std=gnu2x -O2 -g -Wall -Wextra -Werror -Wno-unused-parameter -Wno-unknown-pragmas '-D__declspec(x)=' \
-    -I"$headers/include" -I"$here" "$@" "$here/pehost.c" "$here/gpu_fg.c" "$gen/vk_thunks.c" -ldl -lm -lpthread -o "$out"
+    -I"$headers/include" -I"$here" "$@" "$here/pehost.c" "$here/fg_runtime.c" "$here/gpu_fg.c" "$gen/vk_thunks.c" -ldl -lm -lpthread -o "$out"

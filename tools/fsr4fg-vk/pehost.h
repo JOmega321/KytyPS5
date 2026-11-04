@@ -28,6 +28,10 @@ void      PeSetGdiAdapter(const PeGdiAdapter* adapter);
 // process that keeps low addresses for itself (the emulator's guest) needs this: the mapping could otherwise succeed
 // before that range is taken.
 void      PeSetMinimumAddress(uint64_t address);
+// What a stop does instead of ending the process: `handler` runs on the stopping thread and does not return. (Otherwise
+// the process exits with PE_EXIT_FATAL.)
+void      PeSetFatalHandler(void (*handler)(const char* text));
+void      PeFatal(const char* text);
 PeModule* PeLoad(const char* path);
 // Process attach: TLS callbacks then DllMain. Must run on a thread prepared by PeRunOnWindowsThread.
 int   PeAttach(PeModule* module);
