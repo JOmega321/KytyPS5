@@ -134,4 +134,27 @@ with tempfile.TemporaryDirectory(prefix="fsr4fg-self-test-") as temp:
             expect("compiling pipeline" in v["reason"] and FWD_MV_PROGRAM in v["reason"], "the real crash names the program: " + v["reason"], r)
         else:
             print("note: this driver now compiles AMD's 64-bit sampled image program as shipped")
+
+        # What the game relies on from fg_runtime, on the inputs and device it hands over.
+        game = ["--organic", "--display", "1280x720", "--render", "640x360", "--guest-layout", "--no-pictures", "--game-inputs", "--game-device"]
+
+        def direct(name, *extra, inject=None):
+            env = dict(os.environ)
+            env["radv_cooperative_matrix2_nv"] = "true"
+            env.pop("FSR4FG_INJECT", None)
+            if inject:
+                env["FSR4FG_INJECT"] = inject
+            return subprocess.run([gpu, dll, prepared, str(temp / name), *game, *extra], env=env, capture_output=True, text=True, timeout=200)
+
+        r = direct("stopped", "--frames", "6", inject="fatal-frame")
+        expect(r.returncode == 6 and "frame 2: AMD's runtime is gone (injected), going on without it" in r.stdout and "frame 5: AMD's runtime is gone" in r.stdout,
+               "AMD's runtime stopping mid-run leaves the caller's thread and device working", r)
+        r = direct("resized", "--frames", "8", "--resize-at", "4:960x540")
+        expect(r.returncode == 0 and "display 1280x720 -> 960x540" in r.stdout and "margin:" in r.stdout, "a new display size makes AMD's context again", r)
+        worst = float(r.stdout.split("worst frame ")[1].split(" dB")[0])
+        expect(worst >= 12.0, "and its frames stay right there (worst frame %.2f dB)" % worst, r)
+        expect("queue calls by AMD's code: 0" in r.stdout, "AMD's code never touches a queue, so it cannot race the emulator's", r)
+        expect("this thread's GS base: 0 " in r.stdout, "the caller's thread needs no Windows state", r)
+        r = direct("no-hud", "--frames", "6", "--no-hudless")
+        expect(r.returncode == 0 and "margin:" in r.stdout, "frames without a HUD-less image work (the game's menus)", r)
 print("fsr4fg self-test: OK")

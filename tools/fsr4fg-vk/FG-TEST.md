@@ -53,10 +53,12 @@ runs itself as a child, so a crash or hang in the driver cannot take the answer 
 `STATE_DIR/self-test.json` (exit 0 pass, 1 fail, 2 could not test), with the child's output in `self-test.log`. It takes
 about 8 s with an empty shader cache, 4 s with a filled one.
 
-- The child runs the non-repeating scene at 1280x720 from 640x360 for 6 frames, with `--guest-layout` (below).
+- The child runs the non-repeating scene at 1280x720 from 640x360 for 6 frames, as the game will use it:
+  `--guest-layout` (below), `--game-inputs` (BGRA8, a D32S8 depth copy, a general color image, UV motion vectors) and
+  `--game-device` (robust buffers and images on, otherwise only what AMD's programs declare).
 - It passes when the worst frame's moving areas are at least 12 dB above the better of repeating and blending. On an
-  RX 9060 XT the correct programs' worst frame is 17.37 dB. With R and G swapped in the forward motion program, the
-  best any frame reached was about 6.7 dB. That is one kind of damage, so a pass says the path works, not that the
+  RX 9060 XT the correct programs' worst frame is 16.37 dB. With R and G swapped in the forward motion program, the
+  worst frame is 5.21 dB (no frame reached 7 dB on the simpler inputs). That is one kind of damage, so a pass says the path works, not that the
   picture is right in a game.
 - A verdict holds until the driver, the GPU, AMD's DLL, the prepared programs' contents, `radv_cooperative_matrix2_nv`
   or the test's rules change; `--force` tests anyway. Failures that may not repeat (timeouts, the child killed from
@@ -65,6 +67,8 @@ about 8 s with an empty shader cache, 4 s with a filled one.
 `--guest-layout` reserves the emulator's guest address range the way it does on Linux at startup, so AMD's DLL is
 relocated from its preferred base (`0x180000000`, inside that range). The pictures are byte-identical to an unrelocated
 run.
+
+Other options: `--format rgba8|bgra8|a2b10g10r10`, `--depth r32|d32|d32s8`, `--pq`, `--no-hudless`, `--resize-at N:WxH`.
 
 `tests/fsr4fg-self-test.py` checks all of this, with injected crashes and hangs on software Vulkan and, with
 `--hardware`, a pass, wrong frames and the real RADV crash on AMD's 64-bit sampled image program left as shipped.

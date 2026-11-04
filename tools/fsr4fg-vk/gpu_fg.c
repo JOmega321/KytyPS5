@@ -588,6 +588,7 @@ static int run(void) {
 	uint8_t *truth = malloc(dbytes), *previous = malloc(dbytes), *current = malloc(dbytes), *blend = malloc(dbytes), *generated = malloc(dbytes);
 	bool     reset_next = true, runtime_gone = false;
 	double* gpu_ms = calloc(opt.frames + opt.timing_frames, sizeof(double));
+	double* record_ms = calloc(opt.frames + opt.timing_frames, sizeof(double));
 	double sums[4][3] = {{0}};
 	double margin_sum = 0, margin_worst = INFINITY;
 	unsigned scored = 0;
@@ -654,10 +655,13 @@ static int run(void) {
 		if (f == 2 && fault && !strcmp(fault, "fatal-frame")) FgRtInjectStop();
 		FgRtResult made;
 		// (The first frames find the context still being made: the game shows them without a generated one.)
+		double record_start = now_ms();
 		while ((made = FgRtGenerate(&frame)) == FG_RT_NOT_YET) {
 			struct timespec tick = {0, 5000000};
 			nanosleep(&tick, NULL);
+			record_start = now_ms();
 		}
+		record_ms[f] = now_ms() - record_start;
 		if (made == FG_RT_UNAVAILABLE) {
 			// As the game goes on without AMD's runtime: this thread is unharmed and the device still works.
 			printf("frame %u: AMD's runtime is gone (%s), going on without it\n", f, FgRtReason());
@@ -749,6 +753,13 @@ static int run(void) {
 		qsort(t, n, sizeof(double), compare_double);
 		for (size_t i = 0; i < n; i++) mean += t[i];
 		printf("sustained GPU time over %zu frames in a row: mean %.3f ms, p50 %.3f, p95 %.3f, p99 %.3f, max %.3f\n", n, mean / n, t[n / 2], t[n * 95 / 100],
+		       t[n * 99 / 100], t[n - 1]);
+		// What the caller's thread waits for AMD's thread to record (the emulator holds the renderer's lock meanwhile).
+		memcpy(t, record_ms + opt.frames, n * sizeof(double));
+		qsort(t, n, sizeof(double), compare_double);
+		mean = 0;
+		for (size_t i = 0; i < n; i++) mean += t[i];
+		printf("CPU time recording AMD's frame, over the same frames: mean %.3f ms, p50 %.3f, p95 %.3f, p99 %.3f, max %.3f\n", mean / n, t[n / 2], t[n * 95 / 100],
 		       t[n * 99 / 100], t[n - 1]);
 		free(t);
 	}
