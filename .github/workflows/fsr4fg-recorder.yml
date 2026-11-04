@@ -2,7 +2,7 @@ name: FSR 4 frame generation recorder
 on:
   push:
     branches: [chen-kytyps5-fsr4-upscaler]
-    paths: ['tools/fsr4fg-vk/**', '.github/workflows/fsr4fg-recorder.yml', 'tests/fsr4fg-legalize.py', 'tools/fsr412-vk/adapt_spirv.py',
+    paths: ['tools/fsr4fg-vk/**', '.github/workflows/fsr4fg-recorder.yml', 'tests/fsr4fg-legalize.py', 'tests/fsr4fg-int64-images.py', 'tools/fsr412-vk/adapt_spirv.py',
             'tools/fsr412-vk/prune_bindings.py', 'tools/fsr412-vk/legalize_fp8.py', 'tools/fsr412-vk/build-fp8-tools.sh']
   workflow_dispatch:
 permissions:
@@ -92,7 +92,9 @@ jobs:
         run: |
           python3 -I tools/fsr4fg-vk/prepare_fg.py _Build/fg.dll _Build/prepared --spirv-tools _Build/fp8-tools/build/tools | tee _Build/prepare.json
           python3 -I -c 'import json,sys; a=json.load(open(sys.argv[1])); b=json.load(open(sys.argv[2])); assert a==b, "prepared shaders differ from tools/fsr4fg-vk/prepared-manifest.json"' _Build/prepared/manifest.json tools/fsr4fg-vk/prepared-manifest.json
-          test "$(find _Build/prepared -name '*.spv' | wc -l)" -eq 165
+          test "$(find _Build/prepared -name '*.spv' | wc -l)" -eq 166
+      - name: 64-bit sampled images become exact 32-bit fetches (Mesa rejects them, and RADV then crashes)
+        run: python3 -I tests/fsr4fg-int64-images.py _Build/fp8-tools/build/tools/spirv-val
       - name: The upscaler's FP8 preparation is unchanged by it
         run: |
           curl -fL --retry 3 -o _Build/upscaler.dll https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/v2.4.0/Kits/FidelityFX/signedbin/amd_fidelityfx_upscaler_vk.dll

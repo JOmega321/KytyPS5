@@ -1,5 +1,5 @@
 {
- "asset_version": "KYTY_FSR4FG_VULKAN_FP8_4.0.2_1",
+ "asset_version": "KYTY_FSR4FG_VULKAN_FP8_4.0.2_2",
  "dll_sha256": "d002dabff8c5e71eaa715fc99438cd4dc81230262a7897b16bc402efec3498b4",
  "modules": {
   "00f5116e8e647be29e0760b5b65c7153a7fd894377b38b1d36c6d88d9e4a195c": {
@@ -199,6 +199,10 @@
    "prepared_sha256": "f0129bc9fc6afef10eea6aca64d22fdf9288ac6fe626109a52162f273120f560",
    "reverse_matrix_casts": 1,
    "unused_descriptor_globals": 2
+  },
+  "2a2a5b6951177669aca87999f86e37186ebd25522f7eccc1b0266869817e32b8": {
+   "int64_image_fetches": 1,
+   "prepared_sha256": "89a16dd8abaa0f1e686e92a940533797541d752884f3b22de544ffb570cb4e9d"
   },
   "2ad1157034af99a3b758dc8c9c354e97456889366ec7b7ed7d44543d2c853dd6": {
    "dead_opaque_locals": 0,

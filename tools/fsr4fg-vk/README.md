@@ -56,10 +56,15 @@ AMD's own output on real hardware.
 ## Step 3: AMD's runtime on the real GPU (test only)
 
 - `prepare_fg.py` (with `fg_legalize.py`) prepares all 416 programs from the user's own DLL: the FSR 4.1.2 upscaler's
-  FP8 preparation plus reverse matrix casts in 2- and 4-subgroup workgroups (slices chosen by `SubgroupId`) and
-  16-bit image types. 165 programs change and each passes `spirv-val --target-env vulkan1.3`; the other 251 already
-  do. `prepared-manifest.json` is the expected result; `tests/fsr4fg-legalize.py` checks that the upscaler's FP8
-  programs still prepare byte-identically.
+  FP8 preparation plus reverse matrix casts in 2- and 4-subgroup workgroups (slices chosen by `SubgroupId`), 16-bit
+  image types and 64-bit sampled images. 166 programs change and each passes `spirv-val --target-env vulkan1.3`; the
+  other 250 already do. `prepared-manifest.json` is the expected result; `tests/fsr4fg-legalize.py` checks that the
+  upscaler's FP8 programs still prepare byte-identically.
+- Passing validation is not enough for Mesa. `FFX_MLFI_COMPUTE_FWD_MV` fetches a 64-bit integer sampled image. It is
+  valid SPIR-V, but Mesa has no 64-bit texture type, so `spirv_to_nir` fails on an assertion and returns NULL, and RADV
+  (26.2.5) dereferences that in `radv_shader_spirv_to_nir`: a segfault with no message, inside AMD's context creation.
+  AMD's image and view are already `R32G32_UINT`, and RADV cannot sample `R64_UINT` at all, so the fix is in the program
+  alone: fetch 32-bit, rebuild `R | G << 32` (`tests/fsr4fg-int64-images.py`). No view or descriptor changes.
 - `gpu_fg.c` (`build-gpu.sh`) runs AMD's runtime on the machine's Vulkan device: `gen_vk_thunks.py` generates
   Windows-ABI forwarders for every Vulkan command from the Khronos registry; shader creation swaps in prepared
   modules; matrix pipelines get full subgroups; a synthetic LUID is reported. A synthetic moving scene is scored

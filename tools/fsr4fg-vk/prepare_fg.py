@@ -7,7 +7,7 @@ Usage: prepare_fg.py DLL NEW_OUTPUT_DIR --spirv-tools DIR
 Every SPIR-V module the DLL stores (raw, 416 unique) is put through the preparation the native FSR 4 upscaler
 uses on FP8 programs (tools/fsr412-vk: unused-binding pruning, SSA rewrite, dead opaque locals, reverse matrix casts,
 RGB storage writes padded to RGBA), plus fg_legalize.py (reverse casts in 2- and 4-subgroup workgroups; 16-bit-float
-image types). A module the preparation leaves unchanged is not written. Each written module is named by the
+image types; 64-bit sampled images). A module the preparation leaves unchanged is not written. Each written module is named by the
 SHA-256 of AMD's original, which is what the GPU harness looks up when AMD's runtime creates the shader, and must
 pass `spirv-val --target-env vulkan1.3`. manifest.json records both hashes and what changed. Refuses any other DLL.
 """
@@ -28,12 +28,12 @@ for candidate in (HERE.parent / "fsr412-vk", HERE / "fsr412-vk"):
         break
 sys.path.insert(0, str(HERE))
 from adapt_spirv import pad_rgb_writes  # noqa: E402
-from fg_legalize import bridge_reverse_matrix_conversions_any, retype_half_images  # noqa: E402
+from fg_legalize import bridge_reverse_matrix_conversions_any, retype_half_images, retype_int64_sampled_images  # noqa: E402
 from legalize_fp8 import bridge_reverse_matrix_conversions, remove_dead_opaque_locals  # noqa: E402
 from prune_bindings import prune_unused_bindings  # noqa: E402
 
 DLL_SHA256 = "d002dabff8c5e71eaa715fc99438cd4dc81230262a7897b16bc402efec3498b4"
-ASSET_VERSION = "KYTY_FSR4FG_VULKAN_FP8_4.0.2_1"
+ASSET_VERSION = "KYTY_FSR4FG_VULKAN_FP8_4.0.2_2"
 EXPECTED_UNIQUE = 416
 
 
@@ -108,9 +108,12 @@ def main():
                 notes.update(unused_descriptor_globals=len(dead_globals), dead_opaque_locals=len(dead_locals),
                              reverse_matrix_casts=casts)
             source, half = retype_half_images(source)
+            source, int64 = retype_int64_sampled_images(source)
             source, padded = pad_rgb_writes(source)
             if half:
                 notes["half_image_conversions"] = half
+            if int64:
+                notes["int64_image_fetches"] = int64
             if padded:
                 notes["padded_rgb_writes"] = padded
             if source == code:
@@ -138,6 +141,7 @@ def main():
     counts = {"modules": len(found), "prepared": len(manifest["modules"]),
               "reverse_matrix_casts": sum(m.get("reverse_matrix_casts", 0) for m in manifest["modules"].values()),
               "half_image_programs": sum(1 for m in manifest["modules"].values() if m.get("half_image_conversions")),
+              "int64_image_programs": sum(1 for m in manifest["modules"].values() if m.get("int64_image_fetches")),
               "padded_rgb_programs": sum(1 for m in manifest["modules"].values() if m.get("padded_rgb_writes"))}
     print(json.dumps(counts))
 

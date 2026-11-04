@@ -12,6 +12,9 @@
    types with a 16-bit float sampled type become 32-bit; each read's result is converted back to the 16-bit vector
    the program uses and each write's texel is converted up. Duplicate type declarations created by the change are
    merged. Reads through a sampler may round differently from a native half fetch.
+3. retype_int64_sampled_images: one program fetches a 64-bit integer sampled image. AMD's view of it is R32G32_UINT,
+   and Mesa has no 64-bit texture type, so spirv_to_nir fails on it (RADV then crashes on the NULL it gets back). The
+   image type becomes 32-bit and each fetch rebuilds the value as R | G << 32. The value is exactly the same.
 Pure standard library; refuses any shape it was not written for.
 """
 import struct
@@ -360,3 +363,67 @@ def retype_half_images(code):
     header = list(header)
     header[3] = next_id
     return encode(header, out), conversions
+
+
+def retype_int64_sampled_images(code):
+    header, ins = decode(code)
+    integers = {a[1]: tuple(a[2:]) for a in ins if a[0] & 0xFFFF == 21}
+    images = {a[1]: a for a in ins if a[0] & 0xFFFF == 25}
+    retyped = {i for i, a in images.items() if integers.get(a[2], (0, 0))[0] == 64 and a[7] == 1}
+    if not retyped:
+        return code, 0
+    uint = next((i for i, t in integers.items() if t == (32, 0)), None)
+    if uint is None:
+        raise ValueError("64-bit sampled image without a uint32 type")
+    wide = {images[i][2] for i in retyped}
+    if len(wide) != 1 or integers[next(iter(wide))] != (64, 0) or any(images[i][8] != 0 for i in retyped):
+        raise ValueError("64-bit sampled image other than an unsigned one with Unknown format")
+    u64 = next(iter(wide))
+    for i in retyped:
+        twin = images[i][3:]
+        if any(j not in retyped and a[2] == uint and a[3:] == twin for j, a in images.items()):
+            raise ValueError("retyping a 64-bit sampled image would duplicate an image type")
+        images[i][2] = uint
+    vectors = {(a[2], a[3]): a[1] for a in ins if a[0] & 0xFFFF == 23}
+    constants = {a[3]: a[2] for a in ins if a[0] & 0xFFFF == 43 and a[1] == u64 and len(a) == 5 and a[4] == 0}
+    loaded = {a[2] for a in ins if a[0] & 0xFFFF == 61 and a[1] in retyped}
+    next_id, declarations = header[3], []
+
+    def fresh():
+        nonlocal next_id
+        next_id += 1
+        return next_id - 1
+
+    def constant(value):
+        if value not in constants:
+            constants[value] = fresh()
+            declarations.append([43, u64, constants[value], value, 0])
+        return constants[value]
+
+    if (uint, 4) not in vectors:
+        vectors[(uint, 4)] = fresh()
+        declarations.append([23, vectors[(uint, 4)], uint, 4])
+    uvec4 = vectors[(uint, 4)]
+    zero, one, shift = constant(0), constant(1), constant(32)
+    out, fetches = [], 0
+    for a in ins:
+        op = a[0] & 0xFFFF
+        used = set(a[1:]) & loaded
+        if op != 95 or a[3] not in loaded:
+            if used and not (op == 61 and a[2] in loaded):
+                raise ValueError("64-bit sampled image used by opcode %d" % op)
+            out.append(a)
+            continue
+        result_type, result = a[1], a[2]
+        if result_type != vectors.get((u64, 4)):
+            raise ValueError("fetch of a 64-bit sampled image into another result type")
+        fetched, r, g, low, high, shifted, value = (fresh() for _ in range(7))
+        out += [[95, uvec4, fetched, *a[3:]], [81, uint, r, fetched, 0], [81, uint, g, fetched, 1], [113, u64, low, r],
+                [113, u64, high, g], [196, u64, shifted, high, shift], [197, u64, value, low, shifted],
+                [80, result_type, result, value, zero, zero, one]]
+        fetches += 1
+    first = next(i for i, a in enumerate(out) if a[0] & 0xFFFF == 54)
+    out[first:first] = declarations
+    header = list(header)
+    header[3] = next_id
+    return encode(header, out), fetches
