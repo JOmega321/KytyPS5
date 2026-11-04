@@ -261,7 +261,10 @@ W static VkResult o_vkCreateImageView(VkDevice d, const VkImageViewCreateInfo* i
 		printf("AMD's view of the depth image: format %d, aspect %#x\n", info->format, info->subresourceRange.aspectMask);
 		fflush(stdout);
 	}
-	return ((PFN_vkCreateImageView)VkThunkReal("vkCreateImageView"))(d, info, NULL, out);
+	// (AMD makes views of the frame's images every frame: not a search of every command each time.)
+	static PFN_vkCreateImageView real;
+	if (!real) real = (PFN_vkCreateImageView)VkThunkReal("vkCreateImageView");
+	return real(d, info, NULL, out);
 }
 
 // AMD's runtime must not touch a queue on its own here: the emulator's queues are guarded by its own locks. Counted, so

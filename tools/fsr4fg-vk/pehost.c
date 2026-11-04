@@ -614,7 +614,13 @@ W static void* k_GetProcAddress(void* h, const char* name) {
 	return NULL;
 }
 W static uint32_t k_GetCurrentProcessId(void) { return (uint32_t)getpid(); }
-W static uint32_t k_GetCurrentThreadId(void) { return (uint32_t)syscall(SYS_gettid); }
+// (AMD's code asks often: each std::mutex lock, about 6% of its thread's time as a system call each time.)
+static uint32_t current_tid(void) {
+	static __thread uint32_t tid;
+	if (!tid) tid = (uint32_t)syscall(SYS_gettid);
+	return tid;
+}
+W static uint32_t k_GetCurrentThreadId(void) { return current_tid(); }
 W static void* k_GetCurrentProcess(void) { return (void*)(intptr_t)-1; }
 W static int k_IsDebuggerPresent(void) { return 0; }
 W static void k_InitializeSListHead(void* p) { memset(p, 0, 16); }
@@ -784,7 +790,7 @@ W static void* c_current_exception_context(void) { return &g_exception_slot[1]; 
 W static void m_init_in_situ(uint8_t* m, int type) { memset(m, 0, 80); memcpy(m, &type, 4); }
 W static int m_lock(uint8_t* m) {
 	int type; memcpy(&type, m, 4);
-	uint32_t self = (uint32_t)syscall(SYS_gettid);
+	uint32_t self = current_tid();
 	pthread_mutex_lock(&g_sync);
 	uint32_t* word = (uint32_t*)(m + 16), *owner = (uint32_t*)(m + 24), *count = (uint32_t*)(m + 28);
 	if (*word && *owner == self) {
