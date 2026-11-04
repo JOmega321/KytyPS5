@@ -69,6 +69,7 @@ typedef enum FgRtResult {
 
 typedef struct FgRtStats {
 	unsigned replaced, as_shipped, matrix_pipelines, pipelines, pipeline_failures, thunks_bound, thunks_total;
+	unsigned queue_calls; // vkGetDeviceQueue, vkQueueSubmit*, vkDeviceWaitIdle made by AMD's code
 	double   create_seconds, compile_seconds;
 	uint64_t memory_bytes;
 	uintptr_t image_base;

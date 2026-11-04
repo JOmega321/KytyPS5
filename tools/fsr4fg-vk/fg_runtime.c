@@ -264,6 +264,25 @@ W static VkResult o_vkCreateImageView(VkDevice d, const VkImageViewCreateInfo* i
 	return ((PFN_vkCreateImageView)VkThunkReal("vkCreateImageView"))(d, info, NULL, out);
 }
 
+// AMD's runtime must not touch a queue on its own here: the emulator's queues are guarded by its own locks. Counted, so
+// the test can say so.
+W static void o_vkGetDeviceQueue(VkDevice d, uint32_t family, uint32_t index, VkQueue* queue) {
+	stats.queue_calls++;
+	((PFN_vkGetDeviceQueue)VkThunkReal("vkGetDeviceQueue"))(d, family, index, queue);
+}
+W static VkResult o_vkQueueSubmit(VkQueue queue, uint32_t count, const VkSubmitInfo* submits, VkFence fence) {
+	stats.queue_calls++;
+	return ((PFN_vkQueueSubmit)VkThunkReal("vkQueueSubmit"))(queue, count, submits, fence);
+}
+W static VkResult o_vkQueueSubmit2(VkQueue queue, uint32_t count, const VkSubmitInfo2* submits, VkFence fence) {
+	stats.queue_calls++;
+	return ((PFN_vkQueueSubmit2)VkThunkReal("vkQueueSubmit2"))(queue, count, submits, fence);
+}
+W static VkResult o_vkDeviceWaitIdle(VkDevice d) {
+	stats.queue_calls++;
+	return ((PFN_vkDeviceWaitIdle)VkThunkReal("vkDeviceWaitIdle"))(d);
+}
+
 W static void* dll_get_device_proc_addr(VkDevice d, const char* name) {
 	(void)d;
 	void* f = VkThunkLookup(name);
@@ -329,6 +348,11 @@ static bool load(void) {
 	VkThunkOverride("vkCreateShaderModule", (void*)o_vkCreateShaderModule);
 	VkThunkOverride("vkCreateComputePipelines", (void*)o_vkCreateComputePipelines);
 	VkThunkOverride("vkCreateImageView", (void*)o_vkCreateImageView);
+	VkThunkOverride("vkGetDeviceQueue", (void*)o_vkGetDeviceQueue);
+	VkThunkOverride("vkQueueSubmit", (void*)o_vkQueueSubmit);
+	VkThunkOverride("vkQueueSubmit2", (void*)o_vkQueueSubmit2);
+	VkThunkOverride("vkQueueSubmit2KHR", (void*)o_vkQueueSubmit2);
+	VkThunkOverride("vkDeviceWaitIdle", (void*)o_vkDeviceWaitIdle);
 	VkThunkOverride("vkGetPhysicalDeviceProperties2", (void*)o_vkGetPhysicalDeviceProperties2);
 	VkThunkOverride("vkGetPhysicalDeviceProperties2KHR", (void*)o_vkGetPhysicalDeviceProperties2);
 	PeSetMinimumAddress(cfg.minimum_address);

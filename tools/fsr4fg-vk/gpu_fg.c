@@ -46,7 +46,7 @@ typedef struct Options {
 	const char *dll, *prepared, *out, *provider;
 	uint32_t    dw, dh, rw, rh, frames, timing_frames, self_test_timeout;
 	bool        hud, full_subgroups, probe, organic, guest_layout, no_pictures, identity, self_test, force;
-	bool        game_inputs, hudless_image, hudless_desc, pq;
+	bool        game_inputs, game_device, hudless_image, hudless_desc, pq;
 	VkFormat    color_format, depth_format;
 	uint32_t    resize_at, resize_w, resize_h;
 } Options;
@@ -205,7 +205,7 @@ static void create_device(void) {
 	CHECK(vkEnumerateDeviceExtensionProperties(gpu, NULL, &next, ext));
 	const char* wanted_ext[] = {"VK_EXT_shader_float8", "VK_KHR_cooperative_matrix", "VK_NV_cooperative_matrix2",
 	                            "VK_EXT_shader_image_atomic_int64", "VK_KHR_compute_shader_derivatives"};
-	const char* enabled_ext[5];
+	const char* enabled_ext[6];
 	uint32_t    enabled = 0;
 	bool ok = true;
 	for (size_t i = 0; i < 5; i++) {
@@ -249,8 +249,47 @@ static void create_device(void) {
 		exit(3);
 	}
 	if (!ok) printf("(features for FSR 4.0.2 are missing: continuing for %s)\n", opt.probe ? "the provider probe" : opt.provider);
-	features.features.robustBufferAccess = VK_FALSE;
-	v13.robustImageAccess = VK_FALSE;
+	VkPhysicalDeviceRobustness2FeaturesEXT robustness2 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT};
+	if (opt.game_device) {
+		// The device the emulator makes (vulkanWindow.cpp): robust buffers and images on, and of everything else only what
+		// AMD's programs declare (the emulator enables these for FSR 4 frame generation).
+		VkPhysicalDeviceRobustness2FeaturesEXT have = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT};
+		VkPhysicalDeviceFeatures2 ask = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &have};
+		if (has_extension(ext, next, "VK_EXT_robustness2")) {
+			vkGetPhysicalDeviceFeatures2(gpu, &ask);
+			enabled_ext[enabled++] = "VK_EXT_robustness2";
+			robustness2.robustBufferAccess2 = have.robustBufferAccess2;
+			robustness2.robustImageAccess2 = have.robustImageAccess2;
+			robustness2.nullDescriptor = have.nullDescriptor;
+			robustness2.pNext = features.pNext;
+			features.pNext = &robustness2;
+		}
+		VkPhysicalDeviceFeatures base = {.robustBufferAccess = VK_TRUE, .shaderInt16 = VK_TRUE, .shaderInt64 = VK_TRUE, .shaderStorageImageExtendedFormats = VK_TRUE,
+		                                 .shaderStorageImageReadWithoutFormat = VK_TRUE, .shaderStorageImageWriteWithoutFormat = VK_TRUE};
+		features.features = base;
+		void* next11 = v11.pNext;
+		memset(&v11, 0, sizeof(v11));
+		v11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
+		v11.pNext = next11;
+		v11.storageBuffer16BitAccess = v11.variablePointers = v11.variablePointersStorageBuffer = VK_TRUE;
+		void* next12 = v12.pNext;
+		memset(&v12, 0, sizeof(v12));
+		v12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+		v12.pNext = next12;
+		v12.shaderFloat16 = v12.shaderInt8 = v12.vulkanMemoryModel = v12.vulkanMemoryModelDeviceScope = v12.timelineSemaphore = VK_TRUE;
+		void* next13 = v13.pNext;
+		VkBool32 robust_image = v13.robustImageAccess;
+		memset(&v13, 0, sizeof(v13));
+		v13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+		v13.pNext = next13;
+		v13.robustImageAccess = robust_image;
+		v13.subgroupSizeControl = v13.computeFullSubgroups = v13.synchronization2 = VK_TRUE;
+		printf("device as the emulator makes it: robustBufferAccess on, robustImageAccess %u, robustBufferAccess2 %u, robustImageAccess2 %u\n", robust_image,
+		       robustness2.robustBufferAccess2, robustness2.robustImageAccess2);
+	} else {
+		features.features.robustBufferAccess = VK_FALSE;
+		v13.robustImageAccess = VK_FALSE;
+	}
 	uint32_t nq = 0;
 	vkGetPhysicalDeviceQueueFamilyProperties(gpu, &nq, NULL);
 	VkQueueFamilyProperties qf[32];
@@ -686,6 +725,7 @@ static int run(void) {
 	unsigned long gs = 0;
 	syscall(SYS_arch_prctl, ARCH_GET_GS, &gs);
 	printf("this thread's GS base: %#lx (AMD's code runs on its own thread)\n", gs);
+	printf("queue calls by AMD's code: %u\n", FgRtGetStats().queue_calls);
 	if (scored) {
 		size_t n = opt.frames - 2;
 		double* t = malloc(n * sizeof(double));
@@ -753,7 +793,7 @@ static void reserve_guest_layout(void) {
 // no fallback inside the game could catch, so this process never touches Vulkan: it runs itself as a child, reads what
 // the child says and writes the verdict to STATE_DIR/self-test.json (0: pass, 1: fail, 2: could not test). A verdict
 // holds until the driver, GPU, AMD's DLL, the prepared programs or these rules change (--force tests anyway).
-#define SELF_TEST_RULES 2
+#define SELF_TEST_RULES 3
 #define SELF_TEST_FRAMES "6"
 #define SELF_TEST_DISPLAY "1280x720"
 #define SELF_TEST_RENDER "640x360"
@@ -982,7 +1022,7 @@ static int self_test(char* self) {
 		char seconds[16];
 		snprintf(seconds, sizeof(seconds), "%u", opt.self_test_timeout);
 		char* args[] = {self, (char*)opt.dll, (char*)opt.prepared, dir, "--organic", "--frames", SELF_TEST_FRAMES, "--display", SELF_TEST_DISPLAY,
-		                "--render", SELF_TEST_RENDER, "--guest-layout", "--game-inputs", "--no-pictures", NULL};
+		                "--render", SELF_TEST_RENDER, "--guest-layout", "--game-inputs", "--game-device", "--no-pictures", NULL};
 		printf("self-test: running AMD's runtime on %s\n", who.identity);
 		fflush(stdout);
 		ChildEnd end = run_child(args, opt.self_test_timeout, &run, &status);
@@ -1045,7 +1085,7 @@ int main(int argc, char** argv) {
 	if (argc < 4) {
 		fprintf(stderr, "usage: fsr4fg-gpu DLL PREPARED_DIR NEW_OUTPUT_DIR [--display WxH] [--render WxH] [--frames N] [--no-hud] "
 		                "[--no-full-subgroups] [--provider 4.0.2|3.1.6] [--probe] [--organic] [--timing-frames N] [--guest-layout] [--no-pictures]\n"
-		                "       [--game-inputs] [--format rgba8|bgra8|a2b10g10r10] [--depth r32|d32|d32s8] [--pq] [--no-hudless] [--no-hudless-desc] [--resize-at N:WxH]\n"
+		                "       [--game-inputs] [--game-device] [--format rgba8|bgra8|a2b10g10r10] [--depth r32|d32|d32s8] [--pq] [--no-hudless] [--no-hudless-desc] [--resize-at N:WxH]\n"
 		                "       fsr4fg-gpu DLL PREPARED_DIR STATE_DIR --self-test [--force] [--self-test-timeout SECONDS]\n");
 		return 2;
 	}
@@ -1076,6 +1116,7 @@ int main(int argc, char** argv) {
 			const char* v = argv[++i];
 			opt.depth_format = !strcmp(v, "r32") ? VK_FORMAT_R32_SFLOAT : !strcmp(v, "d32") ? VK_FORMAT_D32_SFLOAT : VK_FORMAT_D32_SFLOAT_S8_UINT;
 		}
+		else if (!strcmp(argv[i], "--game-device")) opt.game_device = true;
 		else if (!strcmp(argv[i], "--pq")) opt.pq = true;
 		else if (!strcmp(argv[i], "--no-hudless")) opt.hudless_image = false;
 		else if (!strcmp(argv[i], "--no-hudless-desc")) opt.hudless_desc = false;
