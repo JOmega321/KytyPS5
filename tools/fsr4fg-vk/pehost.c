@@ -166,6 +166,11 @@ PeModule* PeLoad(const char* path) {
 	return m;
 }
 
+void PeImageRange(const PeModule* m, uintptr_t* base, size_t* size) {
+	*base = (uintptr_t)m->base;
+	*size = m->size;
+}
+
 void* PeExport(PeModule* m, const char* name) {
 	uint32_t pe = rd32(m->base + 0x3c);
 	const uint8_t* dirs = m->base + pe + 24 + 112;

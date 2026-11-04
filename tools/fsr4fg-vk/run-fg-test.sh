@@ -33,6 +33,11 @@ if [[ -z ${radv_cooperative_matrix2_nv+x} ]]; then export radv_cooperative_matri
     2>&1 | tee "$work/preparation.log"
 status=0
 "$here/fsr4fg-gpu" "$dll" "$work/prepared" "$work/results" "$@" 2>&1 | tee "$work/gpu-test.log" || status=${PIPESTATUS[0]}
+if (( status > 128 )); then
+    echo "[FG] exit status $status: stopped by signal $((status - 128)) ($(kill -l $((status - 128)) 2>/dev/null || echo ?))" | tee -a "$work/gpu-test.log"
+else
+    echo "[FG] exit status $status" | tee -a "$work/gpu-test.log"
+fi
 case $status in
     0) echo "[FG] Done. Send gpu-test.log and results/metrics.csv; results/*.ppm are the pictures (generated, exact midpoint, blend).";;
     3) echo '[FG] This driver/GPU lacks features AMD FSR 4 frame generation needs (listed above). Send gpu-test.log.' >&2;;

@@ -27,6 +27,8 @@ PeModule* PeLoad(const char* path);
 // Process attach: TLS callbacks then DllMain. Must run on a thread prepared by PeRunOnWindowsThread.
 int   PeAttach(PeModule* module);
 void* PeExport(PeModule* module, const char* name);
+// The module's mapped image (for crash reports).
+void PeImageRange(const PeModule* module, uintptr_t* base, size_t* size);
 // Runs fn(arg) on a new thread with a Windows TEB, TLS and a 64 MiB stack; returns fn's result.
 int PeRunOnWindowsThread(int (*fn)(void*), void* arg);
 

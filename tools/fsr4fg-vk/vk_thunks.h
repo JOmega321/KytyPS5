@@ -13,5 +13,8 @@ void* VkThunkReal(const char* name);
 // Makes VkThunkLookup return `replacement` (an ms_abi function) for `name`.
 int      VkThunkOverride(const char* name, void* replacement);
 unsigned VkThunkCount(void);
+// The last Vulkan command AMD's code called through a thunk, and how many calls so far (crash diagnostics).
+extern const char* volatile    vk_thunk_last;
+extern volatile unsigned long  vk_thunk_calls;
 
 #endif

@@ -52,6 +52,8 @@ def main():
         "#include <vulkan/vulkan_core.h>",
         '#include "vk_thunks.h"',
         "#define W __attribute__((ms_abi))",
+        "const char* volatile vk_thunk_last;",
+        "volatile unsigned long vk_thunk_calls;",
         "",
     ]
     for name, target in sorted(names):
@@ -59,7 +61,8 @@ def main():
         lines.append("static PFN_%s r_%s;" % (name, name))
         call = "r_%s(%s)" % (name, ", ".join(args))
         body = ("return %s;" % call) if ret != "void" else ("%s;" % call)
-        lines.append("W static %s t_%s(%s) { %s }" % (ret, name, ", ".join(params) or "void", body))
+        lines.append("W static %s t_%s(%s) { vk_thunk_last = \"%s\"; vk_thunk_calls++; %s }"
+                     % (ret, name, ", ".join(params) or "void", name, body))
     lines += [
         "",
         "typedef struct Thunk { const char* name; void** real; void* thunk; void* override; } Thunk;",

@@ -13,7 +13,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
 #include <sys/stat.h>
+#include <time.h>
+#include <ucontext.h>
+#include <unistd.h>
 #include <vulkan/vulkan_core.h>
 
 #include "ffx/api/include/vk/ffx_api_vk.h"
@@ -89,7 +93,60 @@ static VkQueue                   queue;
 static uint32_t                  queue_family;
 static uint64_t                  timestamp_mask;
 static VkPhysicalDeviceMemoryProperties memory_props;
-static unsigned substituted, passed_through, full_subgroup_pipelines, pipeline_failures;
+static unsigned substituted, passed_through, full_subgroup_pipelines, pipeline_failures, pipelines_created;
+static double   pipeline_ms;
+
+// ------------------------------------------------------------------------------------------------ crash reports
+// What the test was doing, for a report if the process dies (a crash in the driver, in AMD's code or here).
+static const char* volatile stage = "starting";
+static char                 stage_detail[256];
+static uintptr_t            dll_base;
+static size_t               dll_size;
+static double now_ms(void) {
+	struct timespec t;
+	clock_gettime(CLOCK_MONOTONIC, &t);
+	return t.tv_sec * 1e3 + t.tv_nsec / 1e6;
+}
+static void say(const char* text) { ssize_t r = write(2, text, strlen(text)); (void)r; }
+static void where(const char* what, uintptr_t address) {
+	char line[512];
+	Dl_info info;
+	if (dll_base && address >= dll_base && address < dll_base + dll_size)
+		snprintf(line, sizeof(line), "  %s %#lx: in AMD's DLL at RVA %#lx\n", what, (unsigned long)address, (unsigned long)(address - dll_base));
+	else if (address && dladdr((void*)address, &info) && info.dli_fname)
+		snprintf(line, sizeof(line), "  %s %#lx: in %s (%s+%#lx)\n", what, (unsigned long)address, info.dli_fname,
+		         info.dli_sname ? info.dli_sname : "?", (unsigned long)(address - (uintptr_t)(info.dli_sname ? info.dli_saddr : info.dli_fbase)));
+	else
+		snprintf(line, sizeof(line), "  %s %#lx: unknown\n", what, (unsigned long)address);
+	say(line);
+}
+static void crashed(int sig, siginfo_t* si, void* uc_) {
+	ucontext_t* uc = uc_;
+	char line[768];
+	snprintf(line, sizeof(line), "\n[FG] STOPPED by signal %d (%s) while: %s %s\n  last Vulkan call from AMD's code: %s (%lu calls)\n",
+	         sig, strsignal(sig), stage, stage_detail, vk_thunk_last ? vk_thunk_last : "none", vk_thunk_calls);
+	say(line);
+	if (sig != SIGINT && sig != SIGTERM) {
+		uintptr_t rip = (uintptr_t)uc->uc_mcontext.gregs[REG_RIP], rsp = (uintptr_t)uc->uc_mcontext.gregs[REG_RSP];
+		snprintf(line, sizeof(line), "  fault address %#lx\n", (unsigned long)(uintptr_t)si->si_addr);
+		say(line);
+		where("instruction", rip);
+		if (rip < 4096 || !dladdr((void*)rip, &(Dl_info){0})) where("return address", *(uintptr_t*)rsp);
+	}
+	signal(sig, SIG_DFL);
+	raise(sig);
+}
+static void install_crash_reports(void) {
+	static uint8_t alt[1 << 16];
+	stack_t ss = {.ss_sp = alt, .ss_size = sizeof(alt)};
+	sigaltstack(&ss, NULL);
+	struct sigaction sa;
+	memset(&sa, 0, sizeof(sa));
+	sa.sa_sigaction = crashed;
+	sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
+	int sigs[] = {SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT, SIGINT, SIGTERM};
+	for (size_t i = 0; i < sizeof(sigs) / sizeof(*sigs); i++) sigaction(sigs[i], &sa, NULL);
+}
 
 #define VKFN(name) static PFN_##name name
 VKFN(vkCreateInstance); VKFN(vkEnumeratePhysicalDevices); VKFN(vkGetPhysicalDeviceProperties);
@@ -124,6 +181,8 @@ W static VkResult o_vkCreateShaderModule(VkDevice d, const VkShaderModuleCreateI
 	(void)a;
 	char hex[65], path[4096];
 	sha256_hex(info->pCode, info->codeSize, hex);
+	stage = "creating shader module";
+	snprintf(stage_detail, sizeof(stage_detail), "(AMD module %.16s..)", hex);
 	snprintf(path, sizeof(path), "%s/%s.spv", opt.prepared, hex);
 	VkShaderModuleCreateInfo replaced = *info;
 	uint32_t* code = NULL;
@@ -167,12 +226,27 @@ W static VkResult o_vkCreateComputePipelines(VkDevice d, VkPipelineCache cache, 
 	(void)a;
 	VkComputePipelineCreateInfo* copy = malloc(n * sizeof(*copy));
 	memcpy(copy, infos, n * sizeof(*copy));
+	bool matrix = false;
 	for (uint32_t i = 0; i < n; i++)
-		if (opt.full_subgroups && module_is_matrix(copy[i].stage.module)) {
-			copy[i].stage.flags |= VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT;
-			full_subgroup_pipelines++;
+		if (module_is_matrix(copy[i].stage.module)) {
+			matrix = true;
+			if (opt.full_subgroups) {
+				copy[i].stage.flags |= VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT;
+				full_subgroup_pipelines++;
+			}
 		}
+	stage = "compiling pipeline";
+	snprintf(stage_detail, sizeof(stage_detail), "%u: %s%s", pipelines_created + 1, copy[0].stage.pName, matrix ? " (FP8 matrix)" : "");
+	printf("compiling pipeline %s\n", stage_detail);
+	fflush(stdout);
+	double start = now_ms();
 	VkResult r = ((PFN_vkCreateComputePipelines)VkThunkReal("vkCreateComputePipelines"))(d, cache, n, copy, NULL, out);
+	double ms = now_ms() - start;
+	pipeline_ms += ms;
+	pipelines_created += n;
+	if (ms > 2000) printf("  (that pipeline took %.1f s)\n", ms / 1000);
+	stage = "AMD context creation";
+	stage_detail[0] = 0;
 	if (r != VK_SUCCESS) {
 		pipeline_failures++;
 		for (uint32_t i = 0; i < n; i++) fprintf(stderr, "vkCreateComputePipelines failed (%d): entry %s\n", r, copy[i].stage.pName);
@@ -545,9 +619,12 @@ W static void message(uint32_t type, const uint16_t* text) {
 
 static int run(void* unused) {
 	(void)unused;
+	install_crash_reports();
+	stage = "creating the Vulkan device";
 	create_device();
 	PeSetImportResolver(import_resolver);
 	PeModule* m = PeLoad(opt.dll);
+	PeImageRange(m, &dll_base, &dll_size);
 	if (!PeAttach(m)) { fprintf(stderr, "DllMain failed\n"); return 4; }
 	FnCreate create = (FnCreate)PeExport(m, "ffxCreateContext");
 	FnDestroy destroy = (FnDestroy)PeExport(m, "ffxDestroyContext");
@@ -579,7 +656,11 @@ static int run(void* unused) {
 	                                                   .displaySize = {opt.dw, opt.dh}, .maxRenderSize = {opt.rw, opt.rh},
 	                                                   .backBufferFormat = FFX_API_SURFACE_FORMAT_R8G8B8A8_UNORM};
 	ffxContext context = NULL;
+	stage = "AMD context creation";
+	double create_start = now_ms();
 	ffxReturnCode_t rc = create(&context, &desc.header, NULL);
+	printf("AMD context creation took %.1f s (%u pipelines, %.1f s compiling)\n", (now_ms() - create_start) / 1000, pipelines_created,
+	       pipeline_ms / 1000);
 	printf("create=%u; AMD shaders: %u replaced by prepared ones, %u used as shipped; %u matrix pipelines with full subgroups; %u pipeline failures\n",
 	       rc, substituted, passed_through, full_subgroup_pipelines, pipeline_failures);
 	if (rc || !context || pipeline_failures) return 4;
@@ -627,6 +708,8 @@ static int run(void* unused) {
 	}
 	for (uint32_t f = 0; f < opt.frames; f++) {
 		Image* color = &present[f & 1];
+		stage = "recording a frame";
+		snprintf(stage_detail, sizeof(stage_detail), "%u", f);
 		render_color(f, true, upload);
 		render_color(f, false, upload + dbytes);
 		render_depth_motion(f, (float*)(upload + 2 * dbytes), (uint16_t*)(upload + 2 * dbytes + rbytes));
@@ -701,6 +784,7 @@ static int run(void* unused) {
 		CHECK(vkEndCommandBuffer(cb));
 		VkSubmitInfo si = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &cb};
 		CHECK(vkResetFences(device, 1, &fence));
+		stage = "waiting for the GPU (frame)";
 		CHECK(vkQueueSubmit(queue, 1, &si, fence));
 		VkResult wr = vkWaitForFences(device, 1, &fence, VK_TRUE, 20ull * 1000000000ull);
 		if (wr != VK_SUCCESS) { fprintf(stderr, "frame %u: GPU did not finish (%d)\n", f, wr); return 4; }
