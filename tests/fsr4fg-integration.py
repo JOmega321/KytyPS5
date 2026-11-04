@@ -58,4 +58,14 @@ window = text("src/graphics/presentation/window/vulkanWindow.cpp")
 expect("graphics.fsr412_fp8_enabled = graphics.fsr412_enabled && fp8_extensions" in window and "fp8_extensions = fp8_requested && fsr_extensions" in window,
        "asking for FSR 4 frame generation does not turn on FP8 upscaling")
 expect(text("src/local/fsr4-framegen.cpp").count("AboveGuest") == 2, "AMD's image is kept above the guest's range")
+
+# On a game version without its interface shaders listed, FSR finds no HUD canvas: they can be found and given without a build.
+hud = text("src/local/hud-anchor.h")
+expect("KYTY_HUD_CANVAS_SHADERS" in hud and "KYTY_HUD_SHADER_LOG" in hud, "the HUD's shaders can be logged and added on another game version")
+run = text("src/graphics/guest_gpu/graphicsRun.cpp")
+expect(run.count("HudAnchor::LogTargetDraw(") == run.count("HudAnchor::Classify("), "every interface draw path logs")
+
+# Timed from the GPU's end by default, and the old timing one switch away.
+present = text("src/graphics/presentation/window/swapchain.cpp")
+expect("KYTY_FG_PACE_GPU" in present and "present_scheduler.Wait(frame.present_tick);" in present, "generated frames are paced from the GPU's end")
 print("fsr4fg integration: OK")

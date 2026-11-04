@@ -969,9 +969,17 @@ struct Presenter::Impl {
 			}
 			return true;
 		};
-		const auto start = std::chrono::steady_clock::now();
-		uint32_t   shown = 0;
-		bool       ok    = true;
+		// FSR: a generated frame shows only once the GPU has made it, and the game's frame after it has no such wait, so timed
+		// from the submit they would land at half a frame less and more that work's time. Timed from its end they are even,
+		// the game's frame that much later. KYTY_FG_PACE_GPU=0: from the submit. (MangoHud and the like time the present
+		// call, not the flip: they do not show this, and show the even frames as uneven ones.)
+		static const bool pace_gpu = [] {
+			const char* value = std::getenv("KYTY_FG_PACE_GPU");
+			return value == nullptr || value[0] != '0';
+		}();
+		auto     start = std::chrono::steady_clock::now();
+		uint32_t shown = 0;
+		bool     ok    = true;
 		for (uint32_t i = 0; ok && i < count; ++i) {
 			if (i > 0) {
 				if (behind()) break;
@@ -979,6 +987,12 @@ struct Presenter::Impl {
 			}
 			ok = show(generated[i]);
 			shown += ok ? 1u : 0u;
+			if (i == 0 && ok && pace_gpu && FrameGen::FsrMarksHud()) {
+				present_scheduler.Wait(frame.present_tick);
+				const auto done = std::chrono::steady_clock::now();
+				FrameCsv::NotePaceWait(std::chrono::duration<double, std::milli>(done - start).count());
+				start = done;
+			}
 		}
 		if (ok) {
 			if (shown > 0 && !behind()) std::this_thread::sleep_until(start + spacing * shown);
@@ -987,8 +1001,9 @@ struct Presenter::Impl {
 		}
 		FrameGen::NotePresented(shown + 1);
 		presented_overlay_revision.store(overlay_visual.revision, std::memory_order_release);
-		window.UpdateTitle(shown + (ok ? 1u : 0u),
-		                   FsrNative::InterpolationRequested() || FrameGen::UsesFsr() ? "FSR 3 FG" : "DLSS-G");
+		window.UpdateTitle(shown + (ok ? 1u : 0u), !(FsrNative::InterpolationRequested() || FrameGen::UsesFsr()) ? "DLSS-G"
+		                                           : std::string_view(FrameGen::FsrName()) == "FSR 4"             ? "FSR 4 FG"
+		                                                                                                           : "FSR 3 FG");
 		frames.Release(&frame, true);
 		return true;
 	}

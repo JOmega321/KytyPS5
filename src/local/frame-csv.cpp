@@ -15,7 +15,7 @@ namespace {
 constexpr uint32_t Slots = 32; // frames in flight at most; a result not there by then is left blank
 
 struct Row {
-	double      time_ms = 0, game_frame_ms = 0, busy_ms = 0, generate_cpu_ms = -1;
+	double      time_ms = 0, game_frame_ms = 0, busy_ms = 0, generate_cpu_ms = -1, pace_wait_ms = -1;
 	uint32_t    generated = 0;
 	int         slot = -1;
 	const char* name = "";
@@ -32,7 +32,7 @@ FILE* Output() {
 			std::printf("KYTY_FRAME_CSV: cannot write %s\n", path);
 			return static_cast<FILE*>(nullptr);
 		}
-		std::fprintf(opened, "time_ms,game_frame_ms,render_busy_ms,generated,generate_cpu_ms,generate_gpu_ms,generator\n");
+		std::fprintf(opened, "time_ms,game_frame_ms,render_busy_ms,generated,generate_cpu_ms,generate_gpu_ms,pace_wait_ms,generator\n");
 		std::printf("KYTY_FRAME_CSV: writing %s\n", path);
 		return opened;
 	}();
@@ -52,6 +52,8 @@ void Write(const Row& row, double gpu_ms) {
 	if (row.generate_cpu_ms >= 0) std::fprintf(Output(), "%.3f", row.generate_cpu_ms);
 	std::fputc(',', Output());
 	if (gpu_ms >= 0) std::fprintf(Output(), "%.3f", gpu_ms);
+	std::fputc(',', Output());
+	if (row.pace_wait_ms >= 0) std::fprintf(Output(), "%.3f", row.pace_wait_ms);
 	std::fprintf(Output(), ",%s\n", row.name);
 }
 
@@ -88,6 +90,10 @@ void GameFrame() {
 	if (!busy_ms.empty()) row.busy_ms = busy_ms.back();
 	Flush();
 	rows.push_back(row);
+}
+
+void NotePaceWait(double ms) {
+	if (Output() != nullptr && !rows.empty()) rows.back().pace_wait_ms = ms;
 }
 
 void BeginGenerate(GraphicContext& graphics, vk::CommandBuffer command) {

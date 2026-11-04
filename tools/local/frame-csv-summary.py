@@ -15,7 +15,7 @@ def percentile(values, fraction):
 
 
 def summarize(path, skip_ms):
-    columns = {"game_frame_ms": [], "render_busy_ms": [], "generate_cpu_ms": [], "generate_gpu_ms": []}
+    columns = {"game_frame_ms": [], "render_busy_ms": [], "generate_cpu_ms": [], "generate_gpu_ms": [], "pace_wait_ms": []}
     generators, frames, generated = {}, 0, 0
     with open(path, newline="") as f:
         for row in csv.DictReader(f):
@@ -26,7 +26,7 @@ def summarize(path, skip_ms):
             generators[row["generator"]] = generators.get(row["generator"], 0) + 1
             for name, values in columns.items():
                 # (0 for game_frame_ms is the first line of a capture, and a long gap is a load or pause, not a frame.)
-                if row[name] and (name != "game_frame_ms" or 0 < float(row[name]) < 500):
+                if row.get(name) and (name != "game_frame_ms" or 0 < float(row[name]) < 500):
                     values.append(float(row[name]))
     print("%s: %d game frames, %d generated; generators: %s" % (path, frames, generated, generators or "none"))
     print("  %-17s %8s %8s %8s %8s %8s" % ("", "mean", "p50", "p95", "p99", "max"))
