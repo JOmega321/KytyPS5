@@ -32,6 +32,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cinttypes>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -274,8 +275,60 @@ inline void NoteCanvas(const HW::Context& ctx, const HW::VertexShaderInfo& vs) {
 	                                                  target.attrib2.height + 1u == CanvasHeight();
 	if (target.base.addr == 0 || !canvas) return;
 	const uint64_t hash = HashAt(vs.es_regs.data_addr);
-	if (hash == PixelShader || std::find(ClipShaders.begin(), ClipShaders.end(), hash) != ClipShaders.end())
+	// KYTY_HUD_CANVAS_SHADERS=<hex,hex,...>: more interface vertex shaders, for a version of the game whose differ (the
+	// ones above are 01.007.000's; KYTY_HUD_SHADER_LOG finds them).
+	static const std::vector<uint64_t> extra = [] {
+		std::vector<uint64_t> hashes;
+		const char*           text = std::getenv("KYTY_HUD_CANVAS_SHADERS");
+		while (text != nullptr && *text != '\0') {
+			char*          end   = nullptr;
+			const uint64_t value = std::strtoull(text, &end, 16);
+			if (end == text) break;
+			hashes.push_back(value);
+			text = *end == ',' ? end + 1 : nullptr;
+		}
+		return hashes;
+	}();
+	if (hash == PixelShader || std::find(ClipShaders.begin(), ClipShaders.end(), hash) != ClipShaders.end() ||
+	    std::find(extra.begin(), extra.end(), hash) != extra.end())
 		FrameGen::NoteUiCanvas(target.base.addr);
+}
+
+// KYTY_HUD_SHADER_LOG=1 (a diagnostic): each shader pair drawing into a canvas-sized target, once per target, with how it
+// draws: to find the interface's shaders in a version of the game whose differ. The HUD draws many small draws with few
+// shaders; a full-screen pass is a few vertices with its own pair.
+inline void LogTargetDraw(const HW::Context& ctx, const HW::VertexShaderInfo& vs, const HW::PixelShaderInfo& ps, uint32_t count,
+                          Prospero::PrimitiveType primitive) {
+	static const bool enabled = std::getenv("KYTY_HUD_SHADER_LOG") != nullptr;
+	if (!enabled || count == 0) return;
+	const auto&    target = ctx.GetRenderTarget(0);
+	const uint32_t width = target.attrib2.width + 1u, height = target.attrib2.height + 1u;
+	const uint32_t canvas = WideWidth() != 0 ? WideWidth() : CanvasWidth();
+	if (target.base.addr == 0 || !(OutputTarget(ctx) || (width == canvas && height == CanvasHeight()))) return;
+	const uint64_t vs_hash = HashAt(vs.es_regs.data_addr), ps_hash = PixelShaderHash(ps);
+	struct Seen {
+		uint64_t vs, ps, address;
+		uint32_t draws;
+	};
+	static std::vector<Seen> seen; // (the GPU thread's)
+	auto                     it = std::find_if(seen.begin(), seen.end(), [&](const Seen& s) {
+		return s.vs == vs_hash && s.ps == ps_hash && s.address == target.base.addr;
+	});
+	if (it == seen.end()) {
+		if (seen.size() >= 256) return;
+		seen.push_back({vs_hash, ps_hash, target.base.addr, 0});
+		it = seen.end() - 1;
+		std::printf("HUD shaders: VS 0x%016" PRIx64 " PS 0x%016" PRIx64 " into %ux%u at 0x%" PRIx64 ": first draw of %u vertices, primitive %d\n",
+		            vs_hash, ps_hash, width, height, static_cast<uint64_t>(target.base.addr), count, static_cast<int>(primitive));
+		std::fflush(stdout);
+	}
+	// (How many draws: the HUD's shaders count up fast.)
+	const uint32_t draws = ++it->draws;
+	if ((draws & (draws - 1u)) == 0u && draws >= 256u) {
+		std::printf("HUD shaders: VS 0x%016" PRIx64 " PS 0x%016" PRIx64 " at 0x%" PRIx64 ": %u draws\n", vs_hash, ps_hash,
+		            static_cast<uint64_t>(target.base.addr), draws);
+		std::fflush(stdout);
+	}
 }
 
 // The vertices of each primitive of a draw (`strip`: each vertex with the two before it), 0 when they are not looked at.

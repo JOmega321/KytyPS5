@@ -63,6 +63,15 @@ game, where FSR 3 built in would otherwise make the frame (`FrameGen::Generate`)
 `KYTY_FRAME_CSV=<file>` records each game frame's time, the render thread's busy part, and frame generation's CPU and
 GPU time, for any generator; `tools/local/frame-csv-summary.py` summarizes captures side by side.
 
+Measured with the renderer idle at 1440p: the CPU recording is about 0.9 ms, about half of it one loop in AMD's code (RVA
+`0x6a08`, 512-entry arrays for each of 196 dispatches) and about 0.2 ms in the driver; it reached about 2 ms during a
+full build. The hand-off to AMD's thread is about 0.02 ms. AMD's barriers are already compute to compute: narrowing them
+changed nothing.
+
+`hud-anchor.h`'s interface shaders are 01.007.000's. On another version FSR finds no HUD canvas, gets no HUD-less image
+and interpolates the HUD: `KYTY_HUD_SHADER_LOG=1` lists the shaders drawing into canvas-sized targets, and
+`KYTY_HUD_CANVAS_SHADERS=<hex,hex>` adds some without a build.
+
 ## Limits
 
 The synthetic device answers every feature query positively (FP8 ones only with the FP8 profile), so this records
