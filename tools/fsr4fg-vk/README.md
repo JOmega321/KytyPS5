@@ -63,5 +63,6 @@ AMD's own output on real hardware.
 - `gpu_fg.c` (`build-gpu.sh`) runs AMD's runtime on the machine's Vulkan device: `gen_vk_thunks.py` generates
   Windows-ABI forwarders for every Vulkan command from the Khronos registry; shader creation swaps in prepared
   modules; matrix pipelines get full subgroups; a synthetic LUID is reported. A synthetic moving scene is scored
-  against its exact in-between pictures (`FG-TEST.md`). CI runs it on software Vulkan (no FP8: only FSR 3.1.6) and
+  against its exact in-between pictures (`FG-TEST.md`). CI probes AMD's providers through it on software Vulkan
+  (llvmpipe: no FP8, so only 3.1.6 is offered; 3.1.6 itself fails to create there, llvmpipe having no wave32) and
   packages it for real hardware. Execution of 4.0.2 on RDNA 4 is unverified until run there.

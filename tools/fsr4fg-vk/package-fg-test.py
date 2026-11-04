@@ -22,7 +22,7 @@ shutil.copy2(binary, out / "fsr4fg-gpu")
 for name in ("prepare_fg.py", "fg_legalize.py", "run-fg-test.sh", "FG-TEST.md", "prepared-manifest.json"):
     shutil.copy2(here / name, out / name)
 (out / "fsr412-vk").mkdir()
-for name in ("adapt_spirv.py", "prune_bindings.py", "legalize_fp8.py"):
+for name in ("adapt_spirv.py", "extract_vk.py", "prune_bindings.py", "legalize_fp8.py"):
     shutil.copy2(repo / "tools/fsr412-vk" / name, out / "fsr412-vk" / name)
 prebuilt = out / "prebuilt"
 (prebuilt / "bin").mkdir(parents=True)
