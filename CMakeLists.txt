@@ -452,6 +452,8 @@ list(APPEND kyty_emulator_src
 	"${KYTY_SOURCE_DIR}/local/fsr4.cpp"
 	"${KYTY_SOURCE_DIR}/local/fsr4-framegen.h"
 	"${KYTY_SOURCE_DIR}/local/fsr4-framegen.cpp"
+	"${KYTY_SOURCE_DIR}/local/frame-csv.h"
+	"${KYTY_SOURCE_DIR}/local/frame-csv.cpp"
 	"${KYTY_SOURCE_DIR}/local/fsr411/fsr411.cpp"
 	"${KYTY_SOURCE_DIR}/local/perf-overlay.h"
 	"${KYTY_SOURCE_DIR}/local/perf-overlay.cpp"

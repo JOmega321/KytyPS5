@@ -14,6 +14,7 @@
 #include "graphics/presentation/systemOverlay.h"
 #include "graphics/presentation/videoOut.h"
 #include "graphics/presentation/window/windowInternal.h"
+#include "local/frame-csv.h"
 #include "loader/demonsSoulsRenderSize.h"
 #include "loader/demonsSoulsWarp.h"
 #ifdef KYTY_LOCAL_VULKAN_RECORDING
@@ -919,8 +920,10 @@ struct Presenter::Impl {
 			}
 			const FrameGen::UpscaleImage backbuffer {composed.image, composed_view, vk::ImageLayout::eGeneral, format, extent,
 			                                         composed.usage, 0, 0};
+			FrameCsv::BeginGenerate(window.graphic_ctx, command.Handle());
 			count = FrameGen::Generate(window.graphic_ctx, command.Handle(), frame.fg.valid && !frame.reusing_last ? &frame.fg : nullptr,
 			                           backbuffer, swapchain.PresentRegion(), outputs, frame.hdr);
+			FrameCsv::EndGenerate(command.Handle(), count, FrameGen::FsrMarksHud() ? FrameGen::FsrName() : "DLSS");
 			// (A live `screenshot`: the finished frame and the frame generated before it.)
 			const auto shot      = Screenshot::Take();
 			auto       capture   = Screenshot::Record(window.graphic_ctx, command.Handle(), composed, shot);
@@ -1993,6 +1996,7 @@ bool Presenter::GeneratesFrames() noexcept {
 void Presenter::Present(Frame& frame, bool reuse) {
 	KYTY_PROFILER_FUNCTION();
 	m_impl->frames.ValidateForPresent(&frame, reuse);
+	if (!reuse) FrameCsv::GameFrame();
 #if defined(__linux__)
 	// Linux frame generation: a new frame, and those NGX makes before it (PresentGenerated). A cleared frame, or an HDR
 	// one for DLSS-G (FSR 3 built in takes PQ frames too), goes the normal way, and generation starts again after it; a
