@@ -161,7 +161,7 @@ VKFN(vkCmdResetQueryPool); VKFN(vkCmdWriteTimestamp); VKFN(vkGetQueryPoolResults
 VKFN(vkResetCommandBuffer);
 
 // ------------------------------------------------------------------------------------------------ overrides (ms_abi)
-typedef struct ModuleInfo { VkShaderModule module; bool matrix; } ModuleInfo;
+typedef struct ModuleInfo { VkShaderModule module; bool matrix, replaced; char hash[17]; } ModuleInfo;
 static ModuleInfo* modules;
 static size_t      module_count, module_cap;
 
@@ -206,7 +206,9 @@ W static VkResult o_vkCreateShaderModule(VkDevice d, const VkShaderModuleCreateI
 			module_cap = module_cap ? module_cap * 2 : 512;
 			modules = realloc(modules, module_cap * sizeof(*modules));
 		}
-		modules[module_count++] = (ModuleInfo){*out, has_matrix_capability(replaced.pCode, replaced.codeSize / 4)};
+		ModuleInfo* added = &modules[module_count++];
+		*added = (ModuleInfo){*out, has_matrix_capability(replaced.pCode, replaced.codeSize / 4), code != NULL, {0}};
+		memcpy(added->hash, hex, 16);
 	} else {
 		fprintf(stderr, "vkCreateShaderModule failed (%d) for AMD module %s\n", r, hex);
 	}
@@ -214,9 +216,14 @@ W static VkResult o_vkCreateShaderModule(VkDevice d, const VkShaderModuleCreateI
 	return r;
 }
 
+// Newest first: AMD destroys modules after building their pipelines, so the driver hands the same handle out again.
+static const ModuleInfo* module_info(VkShaderModule m) {
+	for (size_t i = module_count; i-- > 0;) if (modules[i].module == m) return &modules[i];
+	return NULL;
+}
 static bool module_is_matrix(VkShaderModule m) {
-	for (size_t i = 0; i < module_count; i++) if (modules[i].module == m) return modules[i].matrix;
-	return false;
+	const ModuleInfo* info = module_info(m);
+	return info && info->matrix;
 }
 
 // Matrix programs run with full subgroups (as the native FSR 4 upscaler requires on RADV); AMD's runtime asks only
@@ -236,7 +243,9 @@ W static VkResult o_vkCreateComputePipelines(VkDevice d, VkPipelineCache cache, 
 			}
 		}
 	stage = "compiling pipeline";
-	snprintf(stage_detail, sizeof(stage_detail), "%u: %s%s", pipelines_created + 1, copy[0].stage.pName, matrix ? " (FP8 matrix)" : "");
+	const ModuleInfo* shader = module_info(copy[0].stage.module);
+	snprintf(stage_detail, sizeof(stage_detail), "%u: %s%s, module %s (%s)", pipelines_created + 1, copy[0].stage.pName, matrix ? " (FP8 matrix)" : "",
+	         shader ? shader->hash : "?", shader && shader->replaced ? "prepared" : "as shipped");
 	printf("compiling pipeline %s\n", stage_detail);
 	fflush(stdout);
 	double start = now_ms();
