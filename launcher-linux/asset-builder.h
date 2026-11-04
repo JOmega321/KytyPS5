@@ -22,6 +22,9 @@ public:
     Status Snapshot() const;
     static bool Installed(const std::filesystem::path& directory);
     static bool InstalledFp8(const std::filesystem::path& directory);
+    // FSR 4 frame generation's files (tools/fsr4fg-vk/build_assets.sh): AMD's DLL and the prepared programs.
+    static bool InstalledFrameGen(const std::filesystem::path& directory);
+    static std::filesystem::path FrameGenFolder(const std::filesystem::path& root);
 private:
     mutable std::mutex mutex_;
     Status status_;

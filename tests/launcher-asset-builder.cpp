@@ -57,6 +57,17 @@ int main() {
     assert(!AssetBuilder::InstalledFp8(assets));
     std::ofstream(assets / "fp8" / "ASSET_VERSION") << "FSR412_VULKAN_FP8_4.1.2.4555\n";
     assert(AssetBuilder::InstalledFp8(assets));
+    const auto frame_gen = dir / "frame gen";
+    fs::create_directories(frame_gen / "prepared");
+    assert(!AssetBuilder::InstalledFrameGen(frame_gen));
+    std::ofstream(frame_gen / "prepared" / "ASSET_VERSION") << "KYTY_FSR4FG_VULKAN_FP8_4.0.2_1\n";
+    std::ofstream(frame_gen / "prepared" / "manifest.json") << "{}\n";
+    std::ofstream(frame_gen / "amd_fidelityfx_framegeneration_vk.dll") << "MZ";
+    assert(!AssetBuilder::InstalledFrameGen(frame_gen));
+    std::ofstream(frame_gen / "prepared" / "ASSET_VERSION") << "KYTY_FSR4FG_VULKAN_FP8_4.0.2_2\n";
+    assert(AssetBuilder::InstalledFrameGen(frame_gen));
+    fs::remove(frame_gen / "amd_fidelityfx_framegeneration_vk.dll");
+    assert(!AssetBuilder::InstalledFrameGen(frame_gen));
     fs::remove(assets / "fp8" / "t2160_m1" / "rcas.spv");
     assert(!AssetBuilder::InstalledFp8(assets));
     assert(AssetBuilder::Installed(assets));

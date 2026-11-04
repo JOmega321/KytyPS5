@@ -25,7 +25,8 @@ jobs:
         run: |
           clang++-18 -std=c++20 -pthread -Ilauncher-linux launcher-linux/asset-builder.cpp tests/launcher-asset-builder.cpp -o /tmp/test-asset-builder
           /tmp/test-asset-builder
-          bash -n tools/fsr412-vk/build_assets.sh packaging/chen-appimage/AppRun
+          bash -n tools/fsr412-vk/build_assets.sh tools/fsr4fg-vk/build_assets.sh packaging/chen-appimage/AppRun
+          python3 tests/fsr4fg-integration.py
           python3 tests/fsr412-vk-extract.py
           python3 tests/fsr412-host-audit.py
           python3 tests/fsr412-benchmark.py
@@ -62,7 +63,7 @@ jobs:
             -DCMAKE_EXE_LINKER_FLAGS='-fuse-ld=lld-18 -flto=thin' \
             -DKYTY_PGO_USE="$PWD/tools/pgo/kyty-linux.profdata" \
             -DKYTY_BUILD_ORIGIN=Fork -DKYTY_BUILD_REPOSITORY="$GITHUB_REPOSITORY"
-          cmake --build _Build/appimage --target kyty_emulator kyty_launcher kyty_shader_precompile --parallel 4
+          cmake --build _Build/appimage --target kyty_emulator kyty_launcher kyty_shader_precompile fsr4fg-gpu --parallel 4
           _Build/appimage/kyty_emulator --help > _Build/native-help.log
           _Build/appimage/kyty_launcher --help >> _Build/native-help.log
       - uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
@@ -78,7 +79,7 @@ jobs:
           dpkg-query -W >> _Build/appimage/native-toolchain.txt
           find _Build/appimage/externals -name '*.zip' -exec sha256sum {} + > _Build/appimage/native-downloads.sha256
           tar -C _Build/appimage -czf _Build/native-binaries.tar.gz \
-            kyty_emulator kyty_launcher kyty_shader_precompile CMakeCache.txt kytyGitVersion.h \
+            kyty_emulator kyty_launcher kyty_shader_precompile fsr4fg-gpu CMakeCache.txt kytyGitVersion.h \
             native-source.txt native-dependencies.txt native-toolchain.txt native-downloads.sha256
           cd _Build
           sha256sum native-binaries.tar.gz > native-binaries.tar.gz.sha256
@@ -200,6 +201,19 @@ jobs:
               assert len(list((root/family).glob('*.spv')))==29
               assert (root/family/'initializer.bin').stat().st_size==131072
           PYASSETS
+          # FSR 4 frame generation: the same with host tools hidden, from AMD's DLL, then the self-test's verdict.
+          PATH="$RUNNER_TEMP/kyty-base-tools" ./squashfs-root/AppRun --fsr4fg-tools-check > bundled-fsr4fg-tools.log 2>&1
+          grep -q 'Bundled FSR 4 frame generation tools: OK' bundled-fsr4fg-tools.log
+          curl -fL --retry 3 -o sdk-framegen.dll https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/v2.4.0/Kits/FidelityFX/signedbin/amd_fidelityfx_framegeneration_vk.dll
+          echo 'd002dabff8c5e71eaa715fc99438cd4dc81230262a7897b16bc402efec3498b4  sdk-framegen.dll' | sha256sum -c
+          PATH="$RUNNER_TEMP/kyty-base-tools" ./squashfs-root/AppRun --build-fsr4fg "$PWD/sdk-framegen.dll" > bundled-fsr4fg.log 2>&1
+          grep -q 'Ready: FSR 4 frame generation files' bundled-fsr4fg.log
+          cmp "$XDG_DATA_HOME/KytyPS5-chenxiao07/fsr4fg/prepared/manifest.json" ../tools/fsr4fg-vk/prepared-manifest.json
+          fsr4fg_status=0
+          ./squashfs-root/AppRun --fsr4fg-self-test > bundled-fsr4fg-selftest.log 2>&1 || fsr4fg_status=$?
+          cat bundled-fsr4fg-selftest.log
+          test "$fsr4fg_status" -eq 1 # (no FSR 4 capable GPU here: a verdict with a reason, not a crash of the caller)
+          grep -q '"verdict": "fail"' "$XDG_DATA_HOME/KytyPS5-chenxiao07/fsr4fg/self-test.json"
           # A failed FP8 preparation must preserve the installed INT8/FP8 assets.
           ./squashfs-root/usr/payload/tools/fsr412-vk/prebuilt/bin/kyty-python3 - <<'PYROLLBACK'
           import os,sys

@@ -33,9 +33,14 @@ mkdir -p -- "$KYTY_DLSS_DIR"
 cd -- "$KYTY_APPIMAGE_DATA_DIR"
 export KYTY_FSR412_BUILD_SCRIPT="${KYTY_FSR412_BUILD_SCRIPT:-$runtime/tools/fsr412-vk/build_assets.sh}"
 export KYTY_FSR412_DIR="${KYTY_FSR412_DIR:-$KYTY_APPIMAGE_DATA_DIR/fsr4_412}"
+export KYTY_FSR4FG_BUILD_SCRIPT="${KYTY_FSR4FG_BUILD_SCRIPT:-$runtime/tools/fsr4fg-vk/build_assets.sh}"
+export KYTY_FSR4FG_ASSETS="${KYTY_FSR4FG_ASSETS:-$KYTY_APPIMAGE_DATA_DIR/fsr4fg}"
 case "${1:-}" in
     --fsr412-tools-check) shift; exec bash "$runtime/tools/fsr412-vk/build_assets.sh" --self-check "$@" ;;
     --build-fsr412) shift; exec bash "$runtime/tools/fsr412-vk/build_assets.sh" "$@" "$KYTY_FSR412_DIR" ;;
+    --fsr4fg-tools-check) shift; exec bash "$KYTY_FSR4FG_BUILD_SCRIPT" --self-check ;;
+    --build-fsr4fg) shift; exec bash "$KYTY_FSR4FG_BUILD_SCRIPT" "$@" "$KYTY_FSR4FG_ASSETS" ;;
+    --fsr4fg-self-test) shift; exec "$runtime/fsr4fg-gpu" "$KYTY_FSR4FG_ASSETS/amd_fidelityfx_framegeneration_vk.dll" "$KYTY_FSR4FG_ASSETS/prepared" "$KYTY_FSR4FG_ASSETS" --self-test "$@" ;;
     --emulator) shift; exec "$runtime/kyty_emulator" "$@" ;;
     --precompile) shift; exec "$runtime/kyty_shader_precompile" "$@" ;;
 esac

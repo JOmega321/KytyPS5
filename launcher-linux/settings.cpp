@@ -57,6 +57,8 @@ const nlohmann::ordered_json& Defaults() {
         d["fsr412_dll"] = "";
         d["fsr4_watermark"] = false;
         d["fsr4_precision"] = "int8";
+        d["fsr4_framegen"] = false;
+        d["fsr4fg_dll"] = "";
         d["shader_cache_dir"] = "";
         d["shader_workers"] = 0;
         d["shader_warmup_background"] = true;

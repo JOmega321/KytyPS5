@@ -40,7 +40,7 @@ public:
 
 	[[nodiscard]] bool WantsClose() const { return close_; }
     void PrepareFsrAssets(const std::string& dll);
-    bool AssetBuildRunning() const { return fsr_builder_.Snapshot().running; }
+    bool AssetBuildRunning() const { return fsr_builder_.Snapshot().running || fsr4fg_builder_.Snapshot().running; }
 	// (--screenshot.)
 	void               ShowPage(int index) { page_ = index; }
 	static int         PageCount() { return 8; }
@@ -64,6 +64,9 @@ private:
 	void GraphicsPage();
     void FsrSetupPage();
     fs::path FsrAssetFolder() const;
+    void StartFrameGenAssets(const std::string& source);
+    void FrameGenSetupSection();
+    bool FrameGenReady() const;
     void StartFsrAssets();
 	void GamePage();
 	void ShadersPage();
@@ -157,6 +160,7 @@ private:
 	bool        picker_cache_ = false;
     bool picker_dll_ = false;
     AssetBuilder fsr_builder_;
+    AssetBuilder fsr4fg_builder_;
     std::string fsr_dll_;
     std::chrono::steady_clock::time_point fsr_started_ {};
 	bool        browser_open_ = false; // the built-in folder browser (no zenity or kdialog)

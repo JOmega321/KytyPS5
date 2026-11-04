@@ -1094,8 +1094,8 @@ void LauncherWindow::GraphicsPage() {
     }, "FP8 uses native float8 matrix multiplication with FP16/FP32 compatibility staging. Unsupported FP8 features/assets fall back to INT8; the watermark reports the active precision. Applies next launch.");
     Row("fsr4.radv", [&] {
         ImGui::TextUnformatted(S().Str("upscaler") == "fsr4" && S().Str("fsr4_precision") == "fp8"
-            ? "Enabled automatically with FP8" : "Enabled when FP8 is selected");
-    }, "Selecting FSR 4 FP8 automatically enables Mesa RADV's experimental matrix conversions for the game process. No separate toggle is needed. Applies next launch.");
+            ? "Enabled automatically with FP8" : "Enabled when FP8 or FSR 4 frame generation is selected");
+    }, "Selecting FSR 4 FP8 or FSR 4 frame generation automatically enables Mesa RADV's experimental matrix conversions for the game process. No separate toggle is needed. Applies next launch.");
     Row("fsr4.watermark", [&] { SettingSwitch("##fsr4watermark", "fsr4_watermark", S().Str("upscaler") == "fsr4"); },
         "Emulator status watermark: active FP8/INT8, INT8 when FP8 is unavailable, awaiting upscale, or FSR 3.1 fallback. Applies next launch.");
 
@@ -1253,6 +1253,26 @@ void LauncherWindow::GraphicsPage() {
 		    ImGui::PopTextWrapPos();
 	    },
 	    T("fsr.desc"));
+	Row(
+	    nullptr,
+	    [&] {
+		    ImGui::BeginDisabled(!S().Bool("fsr"));
+		    SettingSwitch("##fsr4fg", "fsr4_framegen");
+		    ImGui::EndDisabled();
+		    ImGui::SameLine(0, 12.0f * scale_);
+		    ImGui::AlignTextToFramePadding();
+		    ImGui::PushTextWrapPos(0.0f);
+		    ImGui::TextUnformatted(T("fsr4fg"));
+		    ImGui::PopTextWrapPos();
+		    if (S().Bool("fsr4_framegen") && !FrameGenReady()) {
+			    ImGui::PushStyleColor(ImGuiCol_Text, V(TextDimColor));
+			    ImGui::PushTextWrapPos(0.0f);
+			    ImGui::TextUnformatted(T("fsr4fg.setup"));
+			    ImGui::PopTextWrapPos();
+			    ImGui::PopStyleColor();
+		    }
+	    },
+	    T("fsr4fg.desc"));
 }
 
 // ------------------------------------------------------------ Game
@@ -1336,6 +1356,61 @@ void LauncherWindow::StartFsrAssets() {
     fsr_builder_.Start({"env", "PYTHONUNBUFFERED=1", "bash", script.string(), dll.string(),
         FsrAssetFolder().string()}, log, [] { Wake(); });
 }
+bool LauncherWindow::FrameGenReady() const {
+    static auto checked = std::chrono::steady_clock::time_point{};
+    static bool ready = false;
+    if (const auto now = std::chrono::steady_clock::now(); now - checked > std::chrono::seconds(1)) {
+        checked = now;
+        ready = AssetBuilder::InstalledFrameGen(AssetBuilder::FrameGenFolder(context_.root));
+    }
+    return ready;
+}
+void LauncherWindow::StartFrameGenAssets(const std::string& source) {
+    std::error_code error;
+    fs::path script = Platform::ExecutableFolder() / "tools/fsr4fg-vk/build_assets.sh";
+    if (const char* path = std::getenv("KYTY_FSR4FG_BUILD_SCRIPT"); path && *path) script = path;
+    if (!fs::is_regular_file(script, error)) script = context_.root / "tools/fsr4fg-vk/build_assets.sh";
+    if (!fs::is_regular_file(script, error)) { Message("The FSR 4 frame generation tools are missing from this installation."); return; }
+    const auto log = context_.LogsFolder() / ("fsr4fg-build-" + std::to_string(std::time(nullptr)) + ".log");
+    fsr4fg_builder_.Start({"env", "PYTHONUNBUFFERED=1", "bash", script.string(), source,
+        AssetBuilder::FrameGenFolder(context_.root).string()}, log, [] { Wake(); });
+}
+void LauncherWindow::FrameGenSetupSection() {
+    auto status = fsr4fg_builder_.Snapshot();
+    const auto folder = AssetBuilder::FrameGenFolder(context_.root);
+    ImGui::Separator();
+    ImGui::TextUnformatted("FSR 4 frame generation (experimental)");
+    Desc("Sets up AMD's FSR Frame Generation 4.0.2 from amd_fidelityfx_framegeneration_vk.dll in AMD FSR SDK 2.4.0 (MIT). The DLL is checked by hash and kept in the folder below, because AMD's runtime runs from it. Turn it on under Frame generation. The game tests it at startup and uses FSR 3 instead if the test fails; the game's log says why.");
+    std::string dll = S().Str("fsr4fg_dll");
+    ImGui::BeginDisabled(status.running);
+    ImGui::SetNextItemWidth(-1);
+    if (ImGui::InputTextWithHint("##fsr4fgdll", "Optional: path to amd_fidelityfx_framegeneration_vk.dll", &dll)) { S().Set("fsr4fg_dll", Trim(dll)); Changed(); }
+    ImGui::EndDisabled();
+    if (FlatButton("Download from AMD and prepare", !status.running)) StartFrameGenAssets("--download");
+    ImGui::SameLine();
+    if (FlatButton("Prepare from this DLL", !status.running && !Trim(dll).empty())) StartFrameGenAssets(fs::absolute(Trim(dll)).lexically_normal().string());
+    ImGui::SameLine();
+    if (FlatButton("Cancel##fsr4fg", status.running)) fsr4fg_builder_.Cancel();
+    ImGui::PushTextWrapPos(0);
+    if (status.running) ImGui::ProgressBar(-static_cast<float>(ImGui::GetTime()), {-1, 0}, "Working...");
+    const bool ready = AssetBuilder::InstalledFrameGen(folder);
+    ImGui::TextUnformatted(ready ? "Files: complete." : "Files: not prepared.");
+    ImGui::Text("Folder: %s", folder.c_str());
+    // The last self-test's verdict (the game runs it; written by fsr4fg-gpu).
+    std::ifstream verdict_file(folder / "self-test.json");
+    std::string line, reason;
+    bool tested = false, passed = false;
+    while (std::getline(verdict_file, line)) {
+        if (line.find("\"verdict\": \"pass\"") != std::string::npos) { tested = passed = true; }
+        else if (line.find("\"verdict\": ") != std::string::npos) { tested = true; }
+        else if (const auto at = line.find("\"reason\": \""); at != std::string::npos && line.size() > at + 13) { reason = line.substr(at + 11, line.size() - at - 13); }
+    }
+    if (!tested) ImGui::TextUnformatted("Last self-test: not run yet.");
+    else if (passed) ImGui::TextUnformatted("Last self-test: passed.");
+    else ImGui::Text("Last self-test: failed, so FSR 3 is used. Reason: %s", reason.c_str());
+    if (!status.output.empty() && status.exit_code != 0) ImGui::TextUnformatted(status.output.c_str());
+    ImGui::PopTextWrapPos();
+}
 void LauncherWindow::FsrSetupPage() {
     PageTitle("nav.fsrsetup");
     auto status = fsr_builder_.Snapshot();
@@ -1389,6 +1464,7 @@ void LauncherWindow::FsrSetupPage() {
     ImGui::TextUnformatted(status.output.empty() ? "Preparation output will appear here, including shader and model checks and any errors." : status.output.c_str());
     if (follow) ImGui::SetScrollHereY(1.0f);
     ImGui::EndChild();
+    FrameGenSetupSection();
     Desc("A complete asset set does not prove GPU support or correct rendering. If the game still falls back, check its log for the reason. Closing the launcher cancels an active build.");
 }
 
@@ -1677,7 +1753,7 @@ std::string LauncherWindow::Summary(std::vector<std::pair<std::string, std::stri
 	if (output1440 && height < 720 && height != 480) height = 720;
 	std::string frame_generation;
 	if (S().Bool("fsr"))
-		frame_generation = T("summary.fsr");
+		frame_generation = T(S().Bool("fsr4_framegen") && FrameGenReady() ? "summary.fsr4" : "summary.fsr");
 	else if (dlss_available_ && S().Int("framegen") >= 2)
 		frame_generation = "DLSS " + std::to_string(S().Int("framegen")) + "x";
 	const auto quality_key = "quality." + (S().Str("quality").empty() ? std::string("standard")

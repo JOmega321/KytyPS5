@@ -3,6 +3,7 @@
 #include <cerrno>
 #include <chrono>
 #include <csignal>
+#include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
 #include <fstream>
@@ -51,6 +52,18 @@ bool AssetBuilder::Installed(const std::filesystem::path& directory) {
 }
 bool AssetBuilder::InstalledFp8(const std::filesystem::path& directory) {
     return CompleteAssets(directory / "fp8", "FSR412_VULKAN_FP8_4.1.2.4555");
+}
+bool AssetBuilder::InstalledFrameGen(const std::filesystem::path& directory) {
+    std::ifstream marker(directory / "prepared" / "ASSET_VERSION");
+    std::string version;
+    std::getline(marker, version);
+    std::error_code error;
+    return version == "KYTY_FSR4FG_VULKAN_FP8_4.0.2_2" && std::filesystem::is_regular_file(directory / "prepared" / "manifest.json", error) &&
+           std::filesystem::is_regular_file(directory / "amd_fidelityfx_framegeneration_vk.dll", error);
+}
+std::filesystem::path AssetBuilder::FrameGenFolder(const std::filesystem::path& root) {
+    if (const char* path = std::getenv("KYTY_FSR4FG_ASSETS"); path && *path) return std::filesystem::absolute(path);
+    return root / "fsr4fg";
 }
 bool AssetBuilder::Start(std::vector<std::string> argv, std::filesystem::path log, std::function<void()> wake) {
     if (Snapshot().running || argv.empty()) return false;

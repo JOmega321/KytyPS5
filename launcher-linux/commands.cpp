@@ -1,4 +1,5 @@
 #include "commands.h"
+#include "asset-builder.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -35,6 +36,7 @@ const std::vector<std::string>& GameVariables() {
                                                  "KYTY_FSR4_WATERMARK",
                                                  "KYTY_FSR4_PRECISION",
                                                  "radv_cooperative_matrix2_nv",
+                                                 "KYTY_FSR4FG_DIR",
                                                  "KYTY_PIPELINE_CACHE_DIR",
                                                  "KYTY_SHADER_PREFETCH_THREADS",
                                                  "KYTY_SHADER_FOLLOW_THREADS",
@@ -277,6 +279,15 @@ Launch Commands::Play(const GameInfo& game, bool direct) const {
 	if (fsr_frames) {
 		Put(set, "KYTY_FRAMEGEN", "1");
 		Put(set, "KYTY_FRAMEGEN_BACKEND", "fsr");
+		// FSR 4 frame generation: the emulator tests it first and falls back to FSR 3 with a logged reason. RADV needs
+		// the matrix setting before Vulkan starts, whichever upscaler was chosen.
+		if (S().Bool("fsr4_framegen")) {
+			const auto folder = fs::absolute(AssetBuilder::FrameGenFolder(context_.root)).lexically_normal();
+			if (AssetBuilder::InstalledFrameGen(folder)) {
+				Put(set, "KYTY_FSR4FG_DIR", folder.string());
+				Put(set, "radv_cooperative_matrix2_nv", "true");
+			}
+		}
 	} else if (context_.DlssAvailable() && frame_gen >= 2) {
 		Put(set, "KYTY_FRAMEGEN", std::to_string(frame_gen - 1));
 	}

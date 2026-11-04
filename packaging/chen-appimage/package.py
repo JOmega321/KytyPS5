@@ -17,7 +17,7 @@ if not reusing:
     payload.mkdir(parents=True)
     subprocess.run(['cmake', '-DCMAKE_INSTALL_PREFIX=' + str(payload),
                     '-DCMAKE_INSTALL_LOCAL_ONLY=1', '-P', str(build / 'cmake_install.cmake')], check=True)
-    for name in ('kyty_launcher', 'kyty_shader_precompile'):
+    for name in ('kyty_launcher', 'kyty_shader_precompile', 'fsr4fg-gpu'):
         shutil.copy2(build / name, payload / name)
 else:
     assert (payload / 'native-reuse.json').is_file()
@@ -40,6 +40,10 @@ conversion = payload / 'tools/fsr412-vk'
 conversion.mkdir(parents=True, exist_ok=True)
 for name in ('extract_vk.py', 'adapt_spirv.py', 'prune_bindings.py', 'legalize_fp8.py', 'recover_assets.py', 'build_assets.sh', 'host-int8-t1080-m0.json'):
     shutil.copy2(root / 'tools/fsr412-vk' / name, conversion / name)
+frame_generation = payload / 'tools/fsr4fg-vk'
+frame_generation.mkdir(parents=True, exist_ok=True)
+for name in ('prepare_fg.py', 'fg_legalize.py', 'build_assets.sh'):
+    shutil.copy2(root / 'tools/fsr4fg-vk' / name, frame_generation / name)
 shutil.copytree(root / 'tools/fsr412-vk/recipes', conversion / 'recipes')
 shutil.copytree(root / 'tools/fsr412-vk/recipes-fp8', conversion / 'recipes-fp8')
 capture = conversion / 'prebuilt'

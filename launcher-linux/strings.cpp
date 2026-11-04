@@ -94,6 +94,7 @@ const Table& English() {
 	    {"summary.dlss", "DLSS"},
 	    {"summary.fsr3", "FSR 3"},
 	    {"summary.fsr", "FSR 3 frame generation"},
+	    {"summary.fsr4", "FSR 4 frame generation (FSR 3 if its test fails)"},
 	    {"summary.hd", "1080p output"},
 	    {"summary.hdr", "HDR"},
 	    {"summary.vsync", "VSync"},
@@ -241,6 +242,9 @@ const Table& English() {
 	    {"dlssruntime.none", "not built yet"},
 	    {"dlssruntime.noScript", "get-dlss-linux.sh is not next to the launcher"},
 	    {"fsr", "AMD FSR 3 frame generation (2x, any graphics card; instead of DLSS frame generation)"},
+	    {"fsr4fg", "AMD FSR 4 frame generation (experimental; Radeon RX 9000 on RADV)"},
+	    {"fsr4fg.desc", "AMD's own FSR Frame Generation 4.0.2 in place of FSR 3 above, set up on the FSR4 setup page. The game tests it at startup (a few seconds the first time) and uses FSR 3 if the test fails, saying why in its log."},
+	    {"fsr4fg.setup", "Not set up yet: use the FSR4 setup page."},
 	    {"fsr.desc", "One generated frame between two of the game's, from its depth and motion. "
 	                 "With VSync the shown "
 	                 "frames are capped at the display's refresh."},
@@ -463,6 +467,7 @@ const Table& Chinese() {
 	    {"summary.dlss", "DLSS"},
 	    {"summary.fsr3", "FSR 3"},
 	    {"summary.fsr", "FSR 3 帧生成"},
+	    {"summary.fsr4", "FSR 4 帧生成（测试失败时使用 FSR 3）"},
 	    {"summary.hd", "1080p 输出"},
 	    {"summary.hdr", "HDR"},
 	    {"summary.vsync", "垂直同步"},
@@ -587,6 +592,9 @@ const Table& Chinese() {
 	    {"dlssruntime.none", "尚未构建"},
 	    {"dlssruntime.noScript", "启动器所在文件夹中没有 get-dlss-linux.sh"},
 	    {"fsr", "AMD FSR 3 帧生成（2 倍，任意显卡；替代 DLSS 帧生成）"},
+	    {"fsr4fg", "AMD FSR 4 帧生成（实验性；RADV 上的 Radeon RX 9000）"},
+	    {"fsr4fg.desc", "AMD 官方 FSR Frame Generation 4.0.2，替代上方的 FSR 3，在 FSR4 setup 页面设置。游戏启动时会先测试（首次需要几秒），测试失败则使用 FSR 3，并在日志中说明原因。"},
+	    {"fsr4fg.setup", "尚未设置：请前往 FSR4 setup 页面。"},
 	    {"fsr.desc",
 	     "根据游戏的深度与运动，在两帧之间生成一帧。开启垂直同步时显示帧数不超过显示器刷新率。"},
 
@@ -795,6 +803,7 @@ const Table& Portuguese() {
 	    {"summary.dlss", "DLSS"},
 	    {"summary.fsr3", "FSR 3"},
 	    {"summary.fsr", "geração de quadros FSR 3"},
+	    {"summary.fsr4", "geração de quadros FSR 4 (FSR 3 se o teste falhar)"},
 	    {"summary.hd", "saída 1080p"},
 	    {"summary.hdr", "HDR"},
 	    {"summary.vsync", "VSync"},
@@ -946,6 +955,9 @@ const Table& Portuguese() {
 	    {"dlssruntime.none", "ainda não compilado"},
 	    {"dlssruntime.noScript", "o get-dlss-linux.sh não está ao lado do launcher"},
 	    {"fsr", "Geração de quadros AMD FSR 3 (2x, qualquer placa de vídeo; no lugar da geração de quadros DLSS)"},
+	    {"fsr4fg", "Geração de quadros AMD FSR 4 (experimental; Radeon RX 9000 no RADV)"},
+	    {"fsr4fg.desc", "O FSR Frame Generation 4.0.2 da própria AMD no lugar do FSR 3 acima, configurado na página FSR4 setup. O jogo o testa ao iniciar (alguns segundos na primeira vez) e usa o FSR 3 se o teste falhar, explicando o motivo no log."},
+	    {"fsr4fg.setup", "Ainda não configurado: use a página FSR4 setup."},
 	    {"fsr.desc", "Um quadro gerado entre dois do jogo, a partir da profundidade e do "
 	                 "movimento. Com VSync os quadros "
 	                 "mostrados ficam limitados à taxa da tela."},
