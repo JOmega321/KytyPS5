@@ -42,6 +42,7 @@ case $status in
     0) echo "[FG] Done. Send gpu-test.log and results/metrics.csv; results/*.ppm are the pictures (generated, exact midpoint, blend).";;
     3) echo '[FG] This driver/GPU lacks features AMD FSR 4 frame generation needs (listed above). Send gpu-test.log.' >&2;;
     5) echo "[FG] AMD's runtime did not offer FSR 4.0.2 on this device. Send gpu-test.log." >&2;;
+    6) echo "[FG] AMD's runtime stopped on something the Linux host does not provide. Send gpu-test.log." >&2;;
     *) echo "[FG] The test failed (status $status). Send gpu-test.log and preparation.log." >&2;;
 esac
 echo '[FG] This test does not change the emulator, its settings or caches.'

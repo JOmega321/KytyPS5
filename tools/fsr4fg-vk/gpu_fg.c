@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <ucontext.h>
@@ -80,7 +81,7 @@ static void sha256_hex(const void* data, size_t n, char out[65]) {
 typedef struct Options {
 	const char *dll, *prepared, *out, *provider;
 	uint32_t    dw, dh, rw, rh, frames, timing_frames;
-	bool        hud, full_subgroups, probe, organic;
+	bool        hud, full_subgroups, probe, organic, guest_layout;
 } Options;
 static Options opt;
 
@@ -871,6 +872,40 @@ static int run(void* unused) {
 	return 0;
 }
 
+// ------------------------------------------------------------------------------------------------ guest layout
+// What the emulator does on Linux at startup (src/kernel/memoryAddressSpace.inc): every free address of the guest's
+// range is taken, PROT_NONE. AMD's preferred base (0x180000000) is inside it, so the image gets relocated above it.
+#define GUEST_MIN 0x40000ull
+#define GUEST_END 0xFC00000000ull
+static void reserve_gap(uint64_t start, uint64_t end) {
+	if (start < GUEST_MIN) start = GUEST_MIN;
+	if (end > GUEST_END) end = GUEST_END;
+	if (end <= start) return;
+	void* p = mmap((void*)(uintptr_t)start, end - start, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED_NOREPLACE, -1, 0);
+	if (p != (void*)(uintptr_t)start) { fprintf(stderr, "cannot reserve the guest range at %#llx: %s\n", (unsigned long long)start, strerror(errno)); exit(4); }
+}
+static void reserve_guest_layout(void) {
+	FILE* maps = fopen("/proc/self/maps", "r");
+	if (!maps) { perror("/proc/self/maps"); exit(4); }
+	char line[512];
+	uint64_t at = GUEST_MIN;
+	// (Read first: mapping while reading would change the list.)
+	static struct { uint64_t start, end; } taken[4096];
+	size_t n = 0;
+	while (fgets(line, sizeof(line), maps) && n < 4096) {
+		unsigned long long a, b;
+		if (sscanf(line, "%llx-%llx", &a, &b) == 2) { taken[n].start = a; taken[n].end = b; n++; }
+	}
+	fclose(maps);
+	for (size_t i = 0; i < n; i++) {
+		reserve_gap(at, taken[i].start);
+		if (taken[i].end > at) at = taken[i].end;
+	}
+	reserve_gap(at, GUEST_END);
+	PeSetMinimumAddress(GUEST_END);
+	printf("guest layout: %#llx..%#llx reserved, as the emulator does\n", GUEST_MIN, GUEST_END);
+}
+
 static bool size(const char* s, uint32_t* w, uint32_t* h) { return sscanf(s, "%ux%u", w, h) == 2 && *w >= 64 && *h >= 64 && *w <= 7680 && *h <= 4320; }
 
 int main(int argc, char** argv) {
@@ -878,7 +913,7 @@ int main(int argc, char** argv) {
 	opt = (Options){.dw = 2560, .dh = 1440, .rw = 1280, .rh = 720, .frames = 12, .hud = true, .full_subgroups = true, .provider = "4.0.2"};
 	if (argc < 4) {
 		fprintf(stderr, "usage: fsr4fg-gpu DLL PREPARED_DIR NEW_OUTPUT_DIR [--display WxH] [--render WxH] [--frames N] [--no-hud] "
-		                "[--no-full-subgroups] [--provider 4.0.2|3.1.6] [--probe] [--organic] [--timing-frames N]\n");
+		                "[--no-full-subgroups] [--provider 4.0.2|3.1.6] [--probe] [--organic] [--timing-frames N] [--guest-layout]\n");
 		return 2;
 	}
 	opt.dll = argv[1];
@@ -893,6 +928,7 @@ int main(int argc, char** argv) {
 		else if (!strcmp(argv[i], "--provider") && i + 1 < argc) opt.provider = argv[++i];
 		else if (!strcmp(argv[i], "--probe")) opt.probe = true;
 		else if (!strcmp(argv[i], "--organic")) opt.organic = true;
+		else if (!strcmp(argv[i], "--guest-layout")) opt.guest_layout = true;
 		else if (!strcmp(argv[i], "--timing-frames") && i + 1 < argc && (opt.timing_frames = (uint32_t)atoi(argv[++i])) >= 1 && opt.timing_frames <= 100000) {}
 		else { fprintf(stderr, "bad option %s\n", argv[i]); return 2; }
 	}
@@ -903,6 +939,7 @@ int main(int argc, char** argv) {
 	FILE* f = fopen(manifest, "r");
 	if (!f) { fprintf(stderr, "%s missing: run prepare_fg.py first\n", manifest); return 2; }
 	fclose(f);
+	if (opt.guest_layout) reserve_guest_layout();
 	printf("FSR frame generation %s GPU test: AMD's runtime on this Linux Vulkan driver, %ux%u (render %ux%u), %u frames\n",
 	       opt.provider, opt.dw, opt.dh, opt.rw, opt.rh, opt.frames);
 	return PeRunOnWindowsThread(run, NULL);

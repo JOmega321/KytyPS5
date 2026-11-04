@@ -24,7 +24,7 @@ typedef uint16_t wchar16;
 static void die(const char* what, const char* detail) {
 	fprintf(stderr, "pehost: %s%s%s\n", what, detail ? ": " : "", detail ? detail : "");
 	fflush(stderr);
-	_exit(3);
+	_exit(PE_EXIT_FATAL);
 }
 
 // ---------------------------------------------------------------------------------------------------- PE image
@@ -44,7 +44,9 @@ static PeModule*        g_module;
 static PeImportResolver g_resolver;
 static PeGdiAdapter     g_gdi;
 static bool             g_gdi_set;
+static uint64_t         g_minimum_address;
 
+void PeSetMinimumAddress(uint64_t address) { g_minimum_address = address; }
 void PeSetImportResolver(PeImportResolver r) { g_resolver = r; }
 void PeSetGdiAdapter(const PeGdiAdapter* a) {
 	g_gdi     = *a;
@@ -92,11 +94,14 @@ PeModule* PeLoad(const char* path) {
 	lower(m->name);
 	m->size  = image_size;
 	m->entry = rd32(opt + 16);
-	void* want = (void*)(uintptr_t)image_base;
-	m->base = mmap(want, image_size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+	m->base = MAP_FAILED;
+	if (image_base >= g_minimum_address)
+		m->base = mmap((void*)(uintptr_t)image_base, image_size, PROT_READ | PROT_WRITE | PROT_EXEC,
+		               MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
 	if (m->base == MAP_FAILED)
 		m->base = mmap(NULL, image_size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 	if (m->base == MAP_FAILED) die("cannot map image", strerror(errno));
+	if ((uint64_t)(uintptr_t)m->base < g_minimum_address) die("image mapped below the minimum address", path);
 	memcpy(m->base, file, header_size);
 	for (uint16_t i = 0; i < nsec; i++) {
 		const uint8_t* s   = sec + 40u * i;
