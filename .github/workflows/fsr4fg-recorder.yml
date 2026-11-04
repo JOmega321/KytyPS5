@@ -2,7 +2,8 @@ name: FSR 4 frame generation recorder
 on:
   push:
     branches: [chen-kytyps5-fsr4-upscaler]
-    paths: ['tools/fsr4fg-vk/**', '.github/workflows/fsr4fg-recorder.yml']
+    paths: ['tools/fsr4fg-vk/**', '.github/workflows/fsr4fg-recorder.yml', 'tests/fsr4fg-legalize.py', 'tools/fsr412-vk/adapt_spirv.py',
+            'tools/fsr412-vk/prune_bindings.py', 'tools/fsr412-vk/legalize_fp8.py', 'tools/fsr412-vk/build-fp8-tools.sh']
   workflow_dispatch:
 permissions:
   contents: read
@@ -71,4 +72,76 @@ jobs:
           path: |
             _Build/contract-*.json
             _Build/run-*/log.txt
+          retention-days: 14
+
+  gpu-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Install build tools and software Vulkan
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends ninja-build cmake libvulkan-dev mesa-vulkan-drivers patchelf python3-full
+      - name: Build pinned SPIR-V tools and fetch AMD's DLL (SDK 2.4.0, pinned)
+        run: |
+          git clone https://github.com/KhronosGroup/Vulkan-Headers.git _Build/vulkan-headers
+          git -C _Build/vulkan-headers checkout 73814d006638aa00bd553215b054f0f02e457e22
+          bash tools/fsr412-vk/build-fp8-tools.sh "$PWD/_Build/fp8-tools"
+          curl -fL --retry 3 -o _Build/fg.dll https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/v2.4.0/Kits/FidelityFX/signedbin/amd_fidelityfx_framegeneration_vk.dll
+          echo 'd002dabff8c5e71eaa715fc99438cd4dc81230262a7897b16bc402efec3498b4  _Build/fg.dll' | sha256sum -c
+      - name: Prepare all 416 programs; every result passes strict Vulkan validation; matches the committed manifest
+        run: |
+          python3 -I tools/fsr4fg-vk/prepare_fg.py _Build/fg.dll _Build/prepared --spirv-tools _Build/fp8-tools/build/tools | tee _Build/prepare.json
+          python3 -I -c 'import json,sys; a=json.load(open(sys.argv[1])); b=json.load(open(sys.argv[2])); assert a==b, "prepared shaders differ from tools/fsr4fg-vk/prepared-manifest.json"' _Build/prepared/manifest.json tools/fsr4fg-vk/prepared-manifest.json
+          test "$(find _Build/prepared -name '*.spv' | wc -l)" -eq 165
+      - name: The upscaler's FP8 preparation is unchanged by it
+        run: |
+          curl -fL --retry 3 -o _Build/upscaler.dll https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/v2.4.0/Kits/FidelityFX/signedbin/amd_fidelityfx_upscaler_vk.dll
+          echo '4a7e895af6e0b615d40a84d59eb8c2b1054ad91cdd0c739567940270d51bdab7  _Build/upscaler.dll' | sha256sum -c
+          python3 -I tests/fsr4fg-legalize.py _Build/upscaler.dll
+      - name: Build the GPU test (AMD runtime through Windows-ABI Vulkan thunks)
+        run: bash tools/fsr4fg-vk/build-gpu.sh _Build/fsr4fg-gpu "$PWD/_Build/vulkan-headers"
+      - name: Software Vulkan probe (no FP8, so AMD offers 3.1.6 only)
+        run: |
+          export VK_DRIVER_FILES=$(find /usr/share/vulkan/icd.d -name '*lvp*' -print -quit)
+          test -n "$VK_DRIVER_FILES"
+          _Build/fsr4fg-gpu _Build/fg.dll _Build/prepared _Build/probe --probe 2>&1 | tee _Build/probe.log
+          grep -q '^AMD provider offered: 3\.1\.6$' _Build/probe.log
+          if grep -q '^AMD provider offered: 4\.0\.2$' _Build/probe.log; then exit 1; fi
+      - name: Software Vulkan end to end with AMD's FSR 3.1.6 provider (informational)
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          export VK_DRIVER_FILES=$(find /usr/share/vulkan/icd.d -name '*lvp*' -print -quit)
+          timeout 900 _Build/fsr4fg-gpu _Build/fg.dll _Build/prepared _Build/fsr3-lavapipe --provider 3.1.6 --display 640x360 --render 320x180 --frames 6 2>&1 | tee _Build/fsr3-lavapipe.log
+      - name: Package the GPU test without AMD bytes and check it end to end
+        run: |
+          /usr/bin/python3 tools/fsr4fg-vk/package-fg-test.py _Build/fsr4fg-gpu _Build/fp8-tools "_Build/FSR4 FG GPU test"
+          (cd "_Build/FSR4 FG GPU test" && sha256sum --quiet -c SHA256SUMS)
+          chmod -x "_Build/FSR4 FG GPU test/fsr4fg-gpu" "_Build/FSR4 FG GPU test/prebuilt/bin/spirv-opt"
+          export VK_DRIVER_FILES=$(find /usr/share/vulkan/icd.d -name '*lvp*' -print -quit)
+          mkdir -p _Build/bundle-run && cd _Build/bundle-run
+          status=0
+          bash "../FSR4 FG GPU test/run-fg-test.sh" "$PWD/../fg.dll" > check.log 2>&1 || status=$?
+          cat check.log
+          test "$status" -eq 3
+          grep -q 'lacks features AMD FSR 4 frame generation needs' check.log
+          cmp fsr4fg-gpu-test.*/prepared/manifest.json ../../tools/fsr4fg-vk/prepared-manifest.json
+      - name: Upload the GPU test (hardware execution unverified)
+        uses: actions/upload-artifact@v4
+        with:
+          name: KytyPS5-fsr4fg-gpu-test-x86_64
+          path: _Build/FSR4 FG GPU test/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Keep logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fsr4fg-gpu-test-ci-logs
+          path: |
+            _Build/*.log
+            _Build/prepare.json
+            _Build/bundle-run/check.log
+            _Build/fsr3-lavapipe/metrics.csv
+          if-no-files-found: ignore
           retention-days: 14
