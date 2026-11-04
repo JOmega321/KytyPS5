@@ -82,6 +82,9 @@ AMD's own output on real hardware.
 | GPU time, 2000 frames in a row, mean / p95 (ms) | 1.97 / 2.54 | 1.77 / 2.76 | | |
 | Video memory AMD reports (MB) | 119.8 | 78.8 | | |
 
+AMD's DLL also runs relocated above the emulator's guest range, with byte-identical output, and `--self-test` reports
+whether all of this works on a machine without being at risk from the driver (`FG-TEST.md`).
+
 Pipelines: 195 for 4.0.2 (4.5 s with an empty shader cache, 0.1 s cached), 18 for 3.1.6. Output is byte-identical
 between runs and with or without full subgroups. Also run: 1920x1080 (2.1 ms) and 3840x2160 (6.3 ms), at scored-frame
 timing, not sustained. Not run: `mlfi_8k`, Vulkan validation layers (not installed here), AMD's Windows output as a

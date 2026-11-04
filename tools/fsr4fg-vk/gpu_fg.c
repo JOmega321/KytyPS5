@@ -6,16 +6,22 @@
 // with simple baselines (repeating a frame, blending two). A test tool: it changes nothing in the emulator.
 #define _GNU_SOURCE
 #define VK_NO_PROTOTYPES
+#include <dirent.h>
 #include <dlfcn.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <math.h>
+#include <poll.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
 #include <sys/mman.h>
+#include <sys/prctl.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <ucontext.h>
 #include <unistd.h>
@@ -80,8 +86,8 @@ static void sha256_hex(const void* data, size_t n, char out[65]) {
 // ------------------------------------------------------------------------------------------------ options/state
 typedef struct Options {
 	const char *dll, *prepared, *out, *provider;
-	uint32_t    dw, dh, rw, rh, frames, timing_frames;
-	bool        hud, full_subgroups, probe, organic, guest_layout;
+	uint32_t    dw, dh, rw, rh, frames, timing_frames, self_test_timeout;
+	bool        hud, full_subgroups, probe, organic, guest_layout, no_pictures, identity, self_test, force;
 } Options;
 static Options opt;
 
@@ -302,6 +308,20 @@ static bool has_extension(const VkExtensionProperties* e, uint32_t n, const char
 	return false;
 }
 
+// tests/fsr4fg-self-test.py: what a driver can do to this process, without needing a driver that does it.
+static void inject_fault(void) {
+	const char* fault = getenv("FSR4FG_INJECT");
+	if (!fault) return;
+	stage = "an injected fault";
+	if (!strcmp(fault, "crash")) {
+		int* volatile null_page = NULL;
+		*null_page = 1;
+	}
+	if (!strcmp(fault, "fatal")) { fprintf(stderr, "pehost: injected\n"); exit(PE_EXIT_FATAL); }
+	if (!strcmp(fault, "hang-hard")) signal(SIGTERM, SIG_IGN);
+	if (!strncmp(fault, "hang", 4)) for (;;) pause();
+}
+
 static void create_device(void) {
 	void* loader = dlopen("libvulkan.so.1", RTLD_NOW);
 	if (!loader) { fprintf(stderr, "libvulkan.so.1 not found\n"); exit(3); }
@@ -335,6 +355,13 @@ static void create_device(void) {
 	printf("device: %s (vendor %04x device %04x), driver %s %s, Vulkan %u.%u\n", props.properties.deviceName, props.properties.vendorID,
 	       props.properties.deviceID, driver.driverName, driver.driverInfo, VK_API_VERSION_MAJOR(props.properties.apiVersion),
 	       VK_API_VERSION_MINOR(props.properties.apiVersion));
+	if (opt.identity) {
+		printf("identity: %04x:%04x:%u:%s:%s\n", props.properties.vendorID, props.properties.deviceID, props.properties.driverVersion,
+		       driver.driverName, driver.driverInfo);
+		fflush(stdout);
+		_exit(0);
+	}
+	inject_fault();
 
 	VkPhysicalDeviceComputeShaderDerivativesFeaturesKHR derivatives = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_KHR};
 	VkPhysicalDeviceShaderImageAtomicInt64FeaturesEXT atomic64 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_IMAGE_ATOMIC_INT64_FEATURES_EXT,
@@ -715,6 +742,7 @@ static int run(void* unused) {
 	uint8_t *truth = malloc(dbytes), *previous = malloc(dbytes), *current = malloc(dbytes), *blend = malloc(dbytes);
 	double* gpu_ms = calloc(opt.frames + opt.timing_frames, sizeof(double));
 	double sums[4][3] = {{0}};
+	double margin_sum = 0, margin_worst = INFINITY;
 	unsigned scored = 0;
 	FILE* csv;
 	{
@@ -828,9 +856,12 @@ static int run(void* unused) {
 		fflush(stdout);
 		if (f >= 2) {
 			for (int k = 0; k < 3; k++) { sums[0][k] += g[k]; sums[1][k] += rpt[k]; sums[2][k] += bl[k]; sums[3][k] += nx[k]; }
+			double margin = g[1] - fmax(rpt[1], bl[1]);
+			margin_sum += margin;
+			margin_worst = fmin(margin_worst, margin);
 			scored++;
 		}
-		if (f == opt.frames / 2) {
+		if (f == opt.frames / 2 && !opt.no_pictures) {
 			write_ppm("generated.ppm", readback);
 			write_ppm("exact-midpoint.ppm", truth);
 			write_ppm("blend.ppm", blend);
@@ -854,6 +885,7 @@ static int run(void* unused) {
 		printf("summary over frames 2..%u: generated %.2f dB (moving %.2f, HUD %.2f); repeat %.2f (%.2f); blend %.2f (%.2f); "
 		       "GPU mean %.3f ms, median %.3f, max %.3f\n", opt.frames - 1, sums[0][0] / scored, sums[0][1] / scored, sums[0][2] / scored,
 		       sums[1][0] / scored, sums[1][1] / scored, sums[2][0] / scored, sums[2][1] / scored, mean / n, t[n / 2], t[n - 1]);
+		printf("margin: moving areas over the better of repeat and blend: mean %.2f dB, worst frame %.2f dB\n", margin_sum / scored, margin_worst);
 		bool better = sums[0][1] > sums[2][1] + 1.0 && sums[0][1] > sums[1][1] + 1.0;
 		printf("%s\n", better ? "RESULT: the generated frames are closer to the exact midpoint than repeating or blending frames."
 		                      : "RESULT: the generated frames are NOT clearly better than repeating or blending frames; inspect the pictures.");
@@ -906,14 +938,303 @@ static void reserve_guest_layout(void) {
 	printf("guest layout: %#llx..%#llx reserved, as the emulator does\n", GUEST_MIN, GUEST_END);
 }
 
+// ------------------------------------------------------------------------------------------------ self-test
+// --self-test: can AMD's runtime run on this machine? The answer has to survive the driver crashing or hanging, which
+// no fallback inside the game could catch, so this process never touches Vulkan: it runs itself as a child, reads what
+// the child says and writes the verdict to STATE_DIR/self-test.json (0: pass, 1: fail, 2: could not test). A verdict
+// holds until the driver, GPU, AMD's DLL, the prepared programs or these rules change (--force tests anyway).
+#define SELF_TEST_RULES 1
+#define SELF_TEST_FRAMES "6"
+#define SELF_TEST_DISPLAY "1280x720"
+#define SELF_TEST_RENDER "640x360"
+// Moving areas, in dB above the better of repeating and blending, on the worst frame. See FG-TEST.md for how it was set.
+#define SELF_TEST_MARGIN 12.0
+#define DLL_SHA256 "d002dabff8c5e71eaa715fc99438cd4dc81230262a7897b16bc402efec3498b4"
+
+static void* read_all(const char* path, size_t* size_out) {
+	FILE* f = fopen(path, "rb");
+	if (!f) return NULL;
+	fseek(f, 0, SEEK_END);
+	long n = ftell(f);
+	fseek(f, 0, SEEK_SET);
+	char* data = n >= 0 ? malloc((size_t)n + 1) : NULL;
+	if (data && fread(data, 1, (size_t)n, f) != (size_t)n) { free(data); data = NULL; }
+	fclose(f);
+	if (data) { data[n] = 0; *size_out = (size_t)n; }
+	return data;
+}
+static bool file_sha256(const char* path, char hex[65]) {
+	size_t n;
+	void* data = read_all(path, &n);
+	if (!data) return false;
+	sha256_hex(data, n, hex);
+	free(data);
+	return true;
+}
+// One hash for everything in the prepared folder: its files' contents, not what the manifest says they are.
+static bool programs_sha256(const char* dir, char hex[65]) {
+	struct dirent** names;
+	int count = scandir(dir, &names, NULL, alphasort);
+	if (count < 0) return false;
+	char*  list = malloc((size_t)count * 340 + 1);
+	size_t used = 0;
+	bool   ok = list != NULL;
+	for (int i = 0; i < count; i++) {
+		char path[4096 + 256], file_hex[65];
+		snprintf(path, sizeof(path), "%s/%s", dir, names[i]->d_name);
+		struct stat info;
+		if (ok && !stat(path, &info) && S_ISREG(info.st_mode)) {
+			if (file_sha256(path, file_hex)) used += (size_t)sprintf(list + used, "%.255s:%s\n", names[i]->d_name, file_hex);
+			else ok = false;
+		}
+		free(names[i]);
+	}
+	free(names);
+	if (ok) sha256_hex(list, used, hex);
+	free(list);
+	return ok;
+}
+static void json_string(FILE* f, const char* name, const char* value, const char* tail) {
+	fprintf(f, " \"%s\": \"", name);
+	for (const unsigned char* c = (const unsigned char*)value; *c; c++) {
+		if (*c == '"' || *c == '\\') fprintf(f, "\\%c", *c);
+		else if (*c < 32) fprintf(f, "\\u%04x", *c);
+		else fputc(*c < 127 ? *c : '?', f); // (child output need not be valid UTF-8; the file must stay valid JSON)
+	}
+	fprintf(f, "\"%s\n", tail);
+}
+
+typedef struct ChildOutput {
+	FILE*  log;
+	char   identity[512], stopped[512], where[512], fatal[512], last[512], missing[1024], progress[512];
+	double margin_worst, margin_mean;
+	bool   has_margin;
+} ChildOutput;
+
+static void child_line(ChildOutput* c, const char* line) {
+	if (c->log) fprintf(c->log, "%s\n", line);
+	double mean, worst;
+	size_t length = strlen(line);
+	if (!strncmp(line, "identity: ", 10)) snprintf(c->identity, sizeof(c->identity), "%s", line + 10);
+	else if (!strncmp(line, "[FG] STOPPED", 12)) snprintf(c->stopped, sizeof(c->stopped), "%s", line + 5);
+	else if (!strncmp(line, "  instruction ", 14)) snprintf(c->where, sizeof(c->where), "%s", line + 2);
+	else if (!strncmp(line, "pehost: ", 8) && strstr(line, "provider read") == NULL && strstr(line, "loaded ") == NULL &&
+	         strstr(line, "unresolved import") == NULL && strstr(line, "LoadLibrary") == NULL) snprintf(c->fatal, sizeof(c->fatal), "%s", line + 8);
+	else if (!strncmp(line, "compiling pipeline ", 19)) snprintf(c->progress, sizeof(c->progress), "%s", line);
+	else if (sscanf(line, "margin: moving areas over the better of repeat and blend: mean %lf dB, worst frame %lf dB", &mean, &worst) == 2) {
+		c->margin_mean = mean;
+		c->margin_worst = worst;
+		c->has_margin = true;
+	} else if (length > 8 && !strcmp(line + length - 7, "MISSING")) {
+		const char* name = line + strspn(line, " ");
+		const char* end  = strstr(name, "  "); // the status column
+		size_t      used = strlen(c->missing);
+		if (end) snprintf(c->missing + used, sizeof(c->missing) - used, "%s%.*s", used ? ", " : "", (int)(end - name), name);
+	}
+	if (length && strncmp(line, "RESULT", 6)) snprintf(c->last, sizeof(c->last), "%s", line);
+}
+
+typedef enum ChildEnd { CHILD_EXITED, CHILD_SIGNALED, CHILD_TIMED_OUT, CHILD_STUCK, CHILD_NOT_STARTED } ChildEnd;
+
+// Runs this program with `args`; every line goes to child_line. A child past `seconds` gets SIGTERM (its crash report
+// says where it was), then SIGKILL. One stuck in the kernel (a GPU reset) is left behind instead of waited for.
+static ChildEnd run_child(char** args, uint32_t seconds, ChildOutput* out, int* status) {
+	int fds[2];
+	if (pipe(fds)) return CHILD_NOT_STARTED;
+	fflush(NULL);
+	pid_t pid = fork();
+	if (pid < 0) { close(fds[0]); close(fds[1]); return CHILD_NOT_STARTED; }
+	if (pid == 0) {
+		prctl(PR_SET_PDEATHSIG, SIGKILL);
+		struct rlimit no_core = {0, 0};
+		setrlimit(RLIMIT_CORE, &no_core); // an expected outcome here, not one to keep a dump of
+		dup2(fds[1], 1);
+		dup2(fds[1], 2);
+		close(fds[0]);
+		close(fds[1]);
+		execv("/proc/self/exe", args);
+		_exit(127);
+	}
+	close(fds[1]);
+	char   buffer[8192], line[4096];
+	size_t used = 0;
+	double start = now_ms(), deadline = start + seconds * 1000.0;
+	bool   timed_out = false, killed = false, open_pipe = true;
+	while (open_pipe) {
+		double remaining = deadline - now_ms();
+		if (remaining <= 0) {
+			if (!timed_out) { timed_out = true; kill(pid, SIGTERM); deadline = now_ms() + 5000; continue; }
+			if (killed) break; // not even SIGKILL ended it: stuck in the kernel
+			killed = true;
+			kill(pid, SIGKILL);
+			deadline = now_ms() + 10000;
+			continue;
+		}
+		struct pollfd p = {fds[0], POLLIN, 0};
+		int r = poll(&p, 1, remaining > 1000 ? 1000 : (int)remaining + 1);
+		if (r < 0 && errno != EINTR) break;
+		if (r <= 0) continue;
+		ssize_t n = read(fds[0], buffer, sizeof(buffer));
+		if (n < 0 && errno == EINTR) continue;
+		if (n <= 0) { open_pipe = false; break; }
+		for (ssize_t i = 0; i < n; i++) {
+			if (buffer[i] == '\n' || used + 1 == sizeof(line)) {
+				line[used] = 0;
+				child_line(out, line);
+				used = 0;
+			} else {
+				line[used++] = buffer[i];
+			}
+		}
+	}
+	if (used) { line[used] = 0; child_line(out, line); }
+	close(fds[0]);
+	// (The pipe also ends when the child dies; give that a moment, then give up on one stuck in the kernel.)
+	for (double until = now_ms() + (killed ? 1000 : 15000);;) {
+		pid_t w = waitpid(pid, status, WNOHANG);
+		if (w == pid) break;
+		if (now_ms() > until) {
+			if (!killed) { killed = true; kill(pid, SIGKILL); until = now_ms() + 10000; continue; }
+			return CHILD_STUCK;
+		}
+		struct timespec tick = {0, 20000000};
+		nanosleep(&tick, NULL);
+	}
+	if (timed_out) return CHILD_TIMED_OUT;
+	return WIFSIGNALED(*status) ? CHILD_SIGNALED : CHILD_EXITED;
+}
+
+static int self_test(char* self) {
+	char path[4096], dll_hex[65], programs_hex[65], asset[128] = "?";
+	if (!file_sha256(opt.dll, dll_hex)) { fprintf(stderr, "self-test: cannot read %s\n", opt.dll); return 2; }
+	if (strcmp(dll_hex, DLL_SHA256)) { fprintf(stderr, "self-test: that is not the SDK 2.4.0 frame generation DLL\n"); return 2; }
+	if (!programs_sha256(opt.prepared, programs_hex)) { fprintf(stderr, "self-test: cannot read the prepared programs in %s\n", opt.prepared); return 2; }
+	snprintf(path, sizeof(path), "%s/ASSET_VERSION", opt.prepared);
+	size_t asset_size;
+	char*  asset_text = read_all(path, &asset_size);
+	if (asset_text) {
+		snprintf(asset, sizeof(asset), "%s", asset_text);
+		asset[strcspn(asset, "\r\n")] = 0;
+		free(asset_text);
+	}
+	// RADV exposes VK_NV_cooperative_matrix2 only with this (as run-fg-test.sh and the launcher set it); a value the
+	// user set stays.
+	setenv("radv_cooperative_matrix2_nv", "true", 0);
+
+	// What is being tested. Asking the driver can crash too, so a child does that as well.
+	ChildOutput who;
+	memset(&who, 0, sizeof(who));
+	int   status = 0;
+	char* ask[] = {self, (char*)opt.dll, (char*)opt.prepared, (char*)opt.out, "--identity", NULL};
+	ChildEnd asked = run_child(ask, 60, &who, &status);
+	char key[1024];
+	const char* verdict;
+	char   reason[1600] = "";
+	double started = now_ms();
+	int    code;
+	bool   transient = false;
+	ChildOutput run;
+	memset(&run, 0, sizeof(run));
+	if (asked != CHILD_EXITED || WEXITSTATUS(status) != 0 || !who.identity[0]) {
+		// No key can be made without the driver's answer, so nothing is cached: the next start asks again.
+		snprintf(key, sizeof(key), "no driver answer");
+		verdict = "fail";
+		code    = 1;
+		snprintf(reason, sizeof(reason), "the Vulkan driver did not answer: %s", who.stopped[0] ? who.stopped : who.last[0] ? who.last : "no output");
+	} else {
+		snprintf(key, sizeof(key), "rules %d|%s|dll %.16s|programs %.16s|%s|matrix2 %s", SELF_TEST_RULES, who.identity, dll_hex, programs_hex, asset,
+		         getenv("radv_cooperative_matrix2_nv"));
+		// A verdict for exactly this?
+		snprintf(path, sizeof(path), "%s/self-test.json", opt.out);
+		size_t stored_size = 0;
+		char*  stored = opt.force ? NULL : read_all(path, &stored_size);
+		if (stored) {
+			char wanted[1200];
+			snprintf(wanted, sizeof(wanted), "\"key\": \"%s\"", key);
+			// (A failure that may not happen again, such as a timeout on a busy machine, is tested again.)
+			if (strstr(stored, wanted) && !strstr(stored, "\"transient\": true")) {
+				bool pass = strstr(stored, "\"verdict\": \"pass\"") != NULL;
+				printf("self-test: %s (kept verdict for %s)\n", pass ? "PASS" : "FAIL", key);
+				const char* said = strstr(stored, "\"reason\": \"");
+				if (said && !pass) {
+					said += 11;
+					printf("self-test: reason: %.*s\n", (int)strcspn(said, "\n") - 2, said);
+				}
+				free(stored);
+				return pass ? 0 : 1;
+			}
+			free(stored);
+		}
+		char dir[4096], log_path[4096];
+		snprintf(dir, sizeof(dir), "%s/self-test-run", opt.out);
+		snprintf(log_path, sizeof(log_path), "%s/self-test.log", opt.out);
+		run.log = fopen(log_path, "w");
+		char seconds[16];
+		snprintf(seconds, sizeof(seconds), "%u", opt.self_test_timeout);
+		char* args[] = {self, (char*)opt.dll, (char*)opt.prepared, dir, "--organic", "--frames", SELF_TEST_FRAMES, "--display", SELF_TEST_DISPLAY,
+		                "--render", SELF_TEST_RENDER, "--guest-layout", "--no-pictures", NULL};
+		printf("self-test: running AMD's runtime on %s\n", who.identity);
+		fflush(stdout);
+		ChildEnd end = run_child(args, opt.self_test_timeout, &run, &status);
+		if (run.log) fclose(run.log);
+		verdict = "fail";
+		code    = 1;
+		if (end == CHILD_NOT_STARTED) {
+			fprintf(stderr, "self-test: cannot start a child: %s\n", strerror(errno));
+			return 2;
+		} else if (end == CHILD_TIMED_OUT || end == CHILD_STUCK) {
+			transient = true;
+			snprintf(reason, sizeof(reason), "no result within %u s%s; last: %s", opt.self_test_timeout, end == CHILD_STUCK ? " and it could not be stopped" : "",
+			         run.stopped[0] ? run.stopped : run.progress[0] ? run.progress : run.last);
+		} else if (end == CHILD_SIGNALED) {
+			transient = WTERMSIG(status) == SIGKILL || WTERMSIG(status) == SIGTERM || WTERMSIG(status) == SIGINT; // out of memory, or stopped from outside
+			snprintf(reason, sizeof(reason), "crashed: %s%s%s", run.stopped[0] ? run.stopped : strsignal(WTERMSIG(status)), run.where[0] ? "; " : "", run.where);
+		} else if (WEXITSTATUS(status) == 3) {
+			snprintf(reason, sizeof(reason), "the driver lacks: %s", run.missing[0] ? run.missing : run.last);
+		} else if (WEXITSTATUS(status) == 5) {
+			snprintf(reason, sizeof(reason), "AMD's runtime does not offer FSR 4.0.2 on this device");
+		} else if (WEXITSTATUS(status) == PE_EXIT_FATAL) {
+			snprintf(reason, sizeof(reason), "AMD's runtime stopped: %s", run.fatal[0] ? run.fatal : run.last);
+		} else if (WEXITSTATUS(status) != 0) {
+			transient = true; // a Vulkan call failed: out of memory or a lost device can be passing conditions
+			snprintf(reason, sizeof(reason), "failed (status %d): %s", WEXITSTATUS(status), run.last);
+		} else if (!run.has_margin) {
+			snprintf(reason, sizeof(reason), "finished without a score");
+		} else if (!(run.margin_worst >= SELF_TEST_MARGIN)) {
+			snprintf(reason, sizeof(reason), "generated frames are wrong: worst frame %.2f dB above repeat and blend, %.1f needed", run.margin_worst, SELF_TEST_MARGIN);
+		} else {
+			verdict = "pass";
+			code    = 0;
+		}
+	}
+	double seconds_taken = (now_ms() - started) / 1000;
+	char temp[4200], final_path[4096];
+	snprintf(final_path, sizeof(final_path), "%s/self-test.json", opt.out);
+	snprintf(temp, sizeof(temp), "%s.tmp", final_path);
+	FILE* f = fopen(temp, "w");
+	if (!f) { perror(temp); return 2; }
+	fprintf(f, "{\n");
+	json_string(f, "verdict", verdict, ",");
+	json_string(f, "reason", reason, ",");
+	json_string(f, "key", key, ",");
+	fprintf(f, " \"transient\": %s,\n", transient ? "true" : "false");
+	if (run.has_margin) fprintf(f, " \"margin_db\": {\"mean\": %.2f, \"worst\": %.2f, \"needed\": %.1f},\n", run.margin_mean, run.margin_worst, SELF_TEST_MARGIN);
+	fprintf(f, " \"seconds\": %.1f\n}\n", seconds_taken);
+	if (fclose(f) || rename(temp, final_path)) { perror(final_path); return 2; }
+	if (code == 0) printf("self-test: PASS in %.1f s, worst frame %.2f dB above repeat and blend (%.1f needed)\n", seconds_taken, run.margin_worst, SELF_TEST_MARGIN);
+	else printf("self-test: FAIL in %.1f s: %s\n", seconds_taken, reason);
+	return code;
+}
+
 static bool size(const char* s, uint32_t* w, uint32_t* h) { return sscanf(s, "%ux%u", w, h) == 2 && *w >= 64 && *h >= 64 && *w <= 7680 && *h <= 4320; }
 
 int main(int argc, char** argv) {
 	setvbuf(stdout, NULL, _IOLBF, 0);
-	opt = (Options){.dw = 2560, .dh = 1440, .rw = 1280, .rh = 720, .frames = 12, .hud = true, .full_subgroups = true, .provider = "4.0.2"};
+	opt = (Options){.dw = 2560, .dh = 1440, .rw = 1280, .rh = 720, .frames = 12, .hud = true, .full_subgroups = true, .provider = "4.0.2", .self_test_timeout = 120};
 	if (argc < 4) {
 		fprintf(stderr, "usage: fsr4fg-gpu DLL PREPARED_DIR NEW_OUTPUT_DIR [--display WxH] [--render WxH] [--frames N] [--no-hud] "
-		                "[--no-full-subgroups] [--provider 4.0.2|3.1.6] [--probe] [--organic] [--timing-frames N] [--guest-layout]\n");
+		                "[--no-full-subgroups] [--provider 4.0.2|3.1.6] [--probe] [--organic] [--timing-frames N] [--guest-layout] [--no-pictures]\n"
+		                "       fsr4fg-gpu DLL PREPARED_DIR STATE_DIR --self-test [--force] [--self-test-timeout SECONDS]\n");
 		return 2;
 	}
 	opt.dll = argv[1];
@@ -929,6 +1250,11 @@ int main(int argc, char** argv) {
 		else if (!strcmp(argv[i], "--probe")) opt.probe = true;
 		else if (!strcmp(argv[i], "--organic")) opt.organic = true;
 		else if (!strcmp(argv[i], "--guest-layout")) opt.guest_layout = true;
+		else if (!strcmp(argv[i], "--no-pictures")) opt.no_pictures = true;
+		else if (!strcmp(argv[i], "--identity")) opt.identity = true;
+		else if (!strcmp(argv[i], "--self-test")) opt.self_test = true;
+		else if (!strcmp(argv[i], "--force")) opt.force = true;
+		else if (!strcmp(argv[i], "--self-test-timeout") && i + 1 < argc && (opt.self_test_timeout = (uint32_t)atoi(argv[++i])) >= 1 && opt.self_test_timeout <= 3600) {}
 		else if (!strcmp(argv[i], "--timing-frames") && i + 1 < argc && (opt.timing_frames = (uint32_t)atoi(argv[++i])) >= 1 && opt.timing_frames <= 100000) {}
 		else { fprintf(stderr, "bad option %s\n", argv[i]); return 2; }
 	}
@@ -939,6 +1265,7 @@ int main(int argc, char** argv) {
 	FILE* f = fopen(manifest, "r");
 	if (!f) { fprintf(stderr, "%s missing: run prepare_fg.py first\n", manifest); return 2; }
 	fclose(f);
+	if (opt.self_test) return self_test(argv[0]);
 	if (opt.guest_layout) reserve_guest_layout();
 	printf("FSR frame generation %s GPU test: AMD's runtime on this Linux Vulkan driver, %ux%u (render %ux%u), %u frames\n",
 	       opt.provider, opt.dw, opt.dh, opt.rw, opt.rh, opt.frames);

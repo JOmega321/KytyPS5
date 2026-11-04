@@ -2,7 +2,7 @@ name: FSR 4 frame generation recorder
 on:
   push:
     branches: [chen-kytyps5-fsr4-upscaler]
-    paths: ['tools/fsr4fg-vk/**', '.github/workflows/fsr4fg-recorder.yml', 'tests/fsr4fg-legalize.py', 'tests/fsr4fg-int64-images.py', 'tools/fsr412-vk/adapt_spirv.py',
+    paths: ['tools/fsr4fg-vk/**', '.github/workflows/fsr4fg-recorder.yml', 'tests/fsr4fg-legalize.py', 'tests/fsr4fg-int64-images.py', 'tests/fsr4fg-self-test.py', 'tools/fsr412-vk/adapt_spirv.py',
             'tools/fsr412-vk/prune_bindings.py', 'tools/fsr412-vk/legalize_fp8.py', 'tools/fsr412-vk/build-fp8-tools.sh']
   workflow_dispatch:
 permissions:
@@ -109,6 +109,16 @@ jobs:
           _Build/fsr4fg-gpu _Build/fg.dll _Build/prepared _Build/probe --probe 2>&1 | tee _Build/probe.log
           grep -q '^AMD provider offered: 3\.1\.6$' _Build/probe.log
           if grep -q '^AMD provider offered: 4\.0\.2$' _Build/probe.log; then exit 1; fi
+      - name: AMD's DLL relocated above the emulator's guest range (software Vulkan)
+        run: |
+          export VK_DRIVER_FILES=$(find /usr/share/vulkan/icd.d -name '*lvp*' -print -quit)
+          _Build/fsr4fg-gpu _Build/fg.dll _Build/prepared _Build/probe-guest --probe --guest-layout 2>&1 | tee _Build/probe-guest.log
+          grep -q 'relocated base' _Build/probe-guest.log
+          grep -q '^AMD provider offered: 3\.1\.6$' _Build/probe-guest.log
+      - name: Self-test verdicts and injected crashes and hangs (software Vulkan)
+        run: |
+          export VK_DRIVER_FILES=$(find /usr/share/vulkan/icd.d -name '*lvp*' -print -quit)
+          python3 -I tests/fsr4fg-self-test.py _Build/fsr4fg-gpu _Build/fg.dll _Build/prepared
       - name: Package the GPU test without AMD bytes and check it end to end
         run: |
           /usr/bin/python3 tools/fsr4fg-vk/package-fg-test.py _Build/fsr4fg-gpu _Build/fp8-tools "_Build/FSR4 FG GPU test"
@@ -122,7 +132,7 @@ jobs:
           test "$status" -eq 3
           grep -q 'lacks features AMD FSR 4 frame generation needs' check.log
           cmp fsr4fg-gpu-test.*/prepared/manifest.json ../../tools/fsr4fg-vk/prepared-manifest.json
-      - name: Upload the GPU test (hardware execution unverified)
+      - name: Upload the GPU test
         uses: actions/upload-artifact@v4
         with:
           name: KytyPS5-fsr4fg-gpu-test-x86_64
