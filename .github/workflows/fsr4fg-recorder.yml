@@ -1,0 +1,74 @@
+name: FSR 4 frame generation recorder
+on:
+  push:
+    branches: [chen-kytyps5-fsr4-upscaler]
+    paths: ['tools/fsr4fg-vk/**', '.github/workflows/fsr4fg-recorder.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  record:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Build the recorder against pinned Khronos headers
+        run: |
+          git clone https://github.com/KhronosGroup/Vulkan-Headers.git _Build/vulkan-headers
+          git -C _Build/vulkan-headers checkout 73814d006638aa00bd553215b054f0f02e457e22
+          bash tools/fsr4fg-vk/build.sh _Build/fsr4fg-record "$PWD/_Build/vulkan-headers/include"
+          bash tools/fsr4fg-vk/build.sh _Build/fsr4fg-record-asan "$PWD/_Build/vulkan-headers/include" -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all
+      - name: Fetch AMD's frame generation DLL (SDK 2.4.0, pinned)
+        run: |
+          curl -fL --retry 3 -o _Build/amd_fidelityfx_framegeneration_vk.dll https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/v2.4.0/Kits/FidelityFX/signedbin/amd_fidelityfx_framegeneration_vk.dll
+          echo 'd002dabff8c5e71eaa715fc99438cd4dc81230262a7897b16bc402efec3498b4  _Build/amd_fidelityfx_framegeneration_vk.dll' | sha256sum -c
+      - name: Record synthetic frames (no Wine, no GPU execution)
+        run: |
+          set -o pipefail
+          root="$PWD"
+          dll="$root/_Build/amd_fidelityfx_framegeneration_vk.dll"
+          while read -r name display render frames; do
+            mkdir -p "_Build/run-$name"
+            (cd "_Build/run-$name" && timeout 300 "$root/_Build/fsr4fg-record" "$dll" "$display" "$render" "$frames" 2>&1 | tee log.txt)
+            python3 -I tools/fsr4fg-vk/analyze_fg.py "_Build/run-$name" "$dll" "_Build/contract-$name.json"
+          done <<'RUNS'
+          1440 2560x1440 1280x720 3
+          1440again 2560x1440 1280x720 3
+          1080 1920x1080 960x540 2
+          2160 3840x2160 1920x1080 2
+          4320 7680x4320 3840x2160 1
+          RUNS
+      - name: Check the contracts
+        run: |
+          d=tools/fsr4fg-vk
+          python3 -I $d/check_contract.py _Build/contract-1440.json mlfi_4k $d/contracts/fg402-2560x1440-render1280x720.json
+          python3 -I $d/check_contract.py _Build/contract-1440again.json mlfi_4k _Build/contract-1440.json
+          python3 -I $d/check_contract.py _Build/contract-1080.json mlfi_4k
+          python3 -I $d/check_contract.py _Build/contract-2160.json mlfi_4k
+          python3 -I $d/check_contract.py _Build/contract-4320.json mlfi_8k
+          if python3 -I $d/check_contract.py _Build/contract-4320.json mlfi_4k; then echo 'checker accepted a wrong family' >&2; exit 1; fi
+      - name: Without FP8 the 4.0.2 provider is not offered (and no fallback is recorded)
+        run: |
+          mkdir -p _Build/run-nofp8 && cd _Build/run-nofp8
+          set +e
+          timeout 120 ../fsr4fg-record ../amd_fidelityfx_framegeneration_vk.dll 2560x1440 1280x720 1 --no-fp8 2>&1 | tee log.txt
+          status=${PIPESTATUS[0]}
+          set -e
+          test "$status" = 5
+          grep -q '^provider .* 3\.1\.6$' log.txt
+          if grep -q '^provider .* 4\.0\.2$' log.txt; then exit 1; fi
+      - name: Host under AddressSanitizer and UBSan
+        env:
+          ASAN_OPTIONS: detect_leaks=0
+        run: |
+          mkdir -p _Build/run-asan && cd _Build/run-asan
+          timeout 600 ../fsr4fg-record-asan ../amd_fidelityfx_framegeneration_vk.dll 2560x1440 1280x720 2
+      - name: Keep the contracts and logs (no AMD shader or weight bytes)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fsr4fg-contracts
+          path: |
+            _Build/contract-*.json
+            _Build/run-*/log.txt
+          retention-days: 14
