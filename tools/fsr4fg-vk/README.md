@@ -52,3 +52,16 @@ they say nothing about image quality, GPU support or speed. Of the DLL's 416 uni
 validation as shipped and 38 still fail after `tools/fsr412-vk`'s FP8 preparation (reverse matrix casts in 2- and
 4-subgroup workgroups; 16-bit-float image types); a replay needs those two cases handled too. Replay correctness has to be checked against
 AMD's own output on real hardware.
+
+## Step 3: AMD's runtime on the real GPU (test only)
+
+- `prepare_fg.py` (with `fg_legalize.py`) prepares all 416 programs from the user's own DLL: the FSR 4.1.2 upscaler's
+  FP8 preparation plus reverse matrix casts in 2- and 4-subgroup workgroups (slices chosen by `SubgroupId`) and
+  16-bit image types. 165 programs change and each passes `spirv-val --target-env vulkan1.3`; the other 251 already
+  do. `prepared-manifest.json` is the expected result; `tests/fsr4fg-legalize.py` checks that the upscaler's FP8
+  programs still prepare byte-identically.
+- `gpu_fg.c` (`build-gpu.sh`) runs AMD's runtime on the machine's Vulkan device: `gen_vk_thunks.py` generates
+  Windows-ABI forwarders for every Vulkan command from the Khronos registry; shader creation swaps in prepared
+  modules; matrix pipelines get full subgroups; a synthetic LUID is reported. A synthetic moving scene is scored
+  against its exact in-between pictures (`FG-TEST.md`). CI runs it on software Vulkan (no FP8: only FSR 3.1.6) and
+  packages it for real hardware. Execution of 4.0.2 on RDNA 4 is unverified until run there.
