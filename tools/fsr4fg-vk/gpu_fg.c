@@ -79,8 +79,8 @@ static void sha256_hex(const void* data, size_t n, char out[65]) {
 // ------------------------------------------------------------------------------------------------ options/state
 typedef struct Options {
 	const char *dll, *prepared, *out, *provider;
-	uint32_t    dw, dh, rw, rh, frames;
-	bool        hud, full_subgroups, probe;
+	uint32_t    dw, dh, rw, rh, frames, timing_frames;
+	bool        hud, full_subgroups, probe, organic;
 } Options;
 static Options opt;
 
@@ -538,6 +538,14 @@ static void render_color(double t, bool with_hud, uint8_t* out) {
 				if (x + 0.5 < x0 || x + 0.5 >= x1 || y + 0.5 < y0 || y + 0.5 >= y1 || objects[i].z >= best) continue;
 				best = objects[i].z;
 				int u = (int)floor(x + 0.5 - x0), v = (int)floor(y + 0.5 - y0);
+				if (opt.organic) { // no repeating pattern, unlike the checker, so a motion estimate has one right answer
+					double a = sin(u * 0.043 + objects[i].seed) * cos(v * 0.071 - 2.0 * objects[i].seed) + 0.5 * sin(u * 0.13 + v * 0.09),
+					       b = sin(u * 0.019 - v * 0.057 + objects[i].seed) + 0.5 * sin(u * 0.31 - v * 0.27);
+					p[0] = (uint8_t)(128 + 80 * a);
+					p[1] = (uint8_t)(128 + 80 * b);
+					p[2] = (uint8_t)(128 + 80 * sin(u * 0.011 + v * 0.023 + a));
+					continue;
+				}
 				bool check = ((u / 16) + (v / 16)) & 1;
 				p[0] = (uint8_t)(check ? 230 : 40 + 60 * objects[i].seed);
 				p[1] = (uint8_t)(check ? 200 - 50 * objects[i].seed : 30);
@@ -704,7 +712,7 @@ static int run(void* unused) {
 	vkGetPhysicalDeviceProperties(gpu, &props);
 
 	uint8_t *truth = malloc(dbytes), *previous = malloc(dbytes), *current = malloc(dbytes), *blend = malloc(dbytes);
-	double* gpu_ms = calloc(opt.frames, sizeof(double));
+	double* gpu_ms = calloc(opt.frames + opt.timing_frames, sizeof(double));
 	double sums[4][3] = {{0}};
 	unsigned scored = 0;
 	FILE* csv;
@@ -715,15 +723,19 @@ static int run(void* unused) {
 		if (!csv) { perror(path); return 4; }
 		fprintf(csv, "frame,gpu_ms,generated_all,generated_moving,generated_hud,repeat_all,repeat_moving,blend_all,blend_moving,next_all,next_moving\n");
 	}
-	for (uint32_t f = 0; f < opt.frames; f++) {
+	for (uint32_t f = 0; f < opt.frames + opt.timing_frames; f++) {
+		// Timing frames reuse the last pictures, so the GPU stays busy instead of idling while the CPU draws the scene.
+		bool scoring = f < opt.frames;
 		Image* color = &present[f & 1];
 		stage = "recording a frame";
 		snprintf(stage_detail, sizeof(stage_detail), "%u", f);
-		render_color(f, true, upload);
-		render_color(f, false, upload + dbytes);
-		render_depth_motion(f, (float*)(upload + 2 * dbytes), (uint16_t*)(upload + 2 * dbytes + rbytes));
-		memcpy(previous, current, dbytes);
-		memcpy(current, upload, dbytes);
+		if (scoring) {
+			render_color(f, true, upload);
+			render_color(f, false, upload + dbytes);
+			render_depth_motion(f, (float*)(upload + 2 * dbytes), (uint16_t*)(upload + 2 * dbytes + rbytes));
+			memcpy(previous, current, dbytes);
+			memcpy(current, upload, dbytes);
+		}
 		VkCommandBufferBeginInfo bi = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT};
 		CHECK(vkResetCommandBuffer(cb, 0));
 		CHECK(vkBeginCommandBuffer(cb, &bi));
@@ -801,6 +813,7 @@ static int run(void* unused) {
 		CHECK(vkGetQueryPoolResults(device, queries, 0, 2, sizeof(ts), ts, 8, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT));
 		gpu_ms[f] = (double)((ts[1] - ts[0]) & timestamp_mask) * props.limits.timestampPeriod / 1e6;
 		if (f == 0) { printf("frame 0 (reset): GPU %.3f ms (includes first use)\n", gpu_ms[f]); fflush(stdout); continue; }
+		if (!scoring) continue;
 		render_color(f - 0.5, true, truth);
 		for (size_t i = 0; i < dbytes; i++) blend[i] = (uint8_t)((previous[i] + current[i] + 1) / 2);
 		double g[3], rpt[3], bl[3], nx[3];
@@ -845,6 +858,16 @@ static int run(void* unused) {
 		                      : "RESULT: the generated frames are NOT clearly better than repeating or blending frames; inspect the pictures.");
 		free(t);
 	}
+	if (opt.timing_frames) {
+		size_t n = opt.timing_frames;
+		double* t = malloc(n * sizeof(double)), mean = 0;
+		memcpy(t, gpu_ms + opt.frames, n * sizeof(double));
+		qsort(t, n, sizeof(double), compare_double);
+		for (size_t i = 0; i < n; i++) mean += t[i];
+		printf("sustained GPU time over %zu frames in a row: mean %.3f ms, p50 %.3f, p95 %.3f, p99 %.3f, max %.3f\n", n, mean / n, t[n / 2], t[n * 95 / 100],
+		       t[n * 99 / 100], t[n - 1]);
+		free(t);
+	}
 	return 0;
 }
 
@@ -855,7 +878,7 @@ int main(int argc, char** argv) {
 	opt = (Options){.dw = 2560, .dh = 1440, .rw = 1280, .rh = 720, .frames = 12, .hud = true, .full_subgroups = true, .provider = "4.0.2"};
 	if (argc < 4) {
 		fprintf(stderr, "usage: fsr4fg-gpu DLL PREPARED_DIR NEW_OUTPUT_DIR [--display WxH] [--render WxH] [--frames N] [--no-hud] "
-		                "[--no-full-subgroups] [--provider 4.0.2|3.1.6] [--probe]\n");
+		                "[--no-full-subgroups] [--provider 4.0.2|3.1.6] [--probe] [--organic] [--timing-frames N]\n");
 		return 2;
 	}
 	opt.dll = argv[1];
@@ -869,6 +892,8 @@ int main(int argc, char** argv) {
 		else if (!strcmp(argv[i], "--no-full-subgroups")) opt.full_subgroups = false;
 		else if (!strcmp(argv[i], "--provider") && i + 1 < argc) opt.provider = argv[++i];
 		else if (!strcmp(argv[i], "--probe")) opt.probe = true;
+		else if (!strcmp(argv[i], "--organic")) opt.organic = true;
+		else if (!strcmp(argv[i], "--timing-frames") && i + 1 < argc && (opt.timing_frames = (uint32_t)atoi(argv[++i])) >= 1 && opt.timing_frames <= 100000) {}
 		else { fprintf(stderr, "bad option %s\n", argv[i]); return 2; }
 	}
 	if (opt.rw > opt.dw || opt.rh > opt.dh) { fprintf(stderr, "render size above display size\n"); return 2; }

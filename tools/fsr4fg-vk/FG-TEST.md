@@ -28,6 +28,13 @@ bash run-fg-test.sh /path/to/amd_fidelityfx_framegeneration_vk.dll
 Default: 2560x1440 output, 1280x720 render size, 12 frames. Other sizes:
 `bash run-fg-test.sh --download --display 1920x1080 --render 960x540 --frames 24`.
 
+- `--organic`: non-repeating object textures. The default checker repeats every 32 pixels, so a motion estimate can match
+  the wrong cell. Compare both before reading a low score as a fault.
+- `--timing-frames N`: N more frames in a row without drawing the scene, for GPU time under sustained load. Scored
+  frames alone leave the GPU idle for seconds between dispatches, so their times swing with its clock (2.5 to 4.1 ms
+  here for the same work).
+- `--provider 3.1.6`: AMD's FSR 3.1.6 through the same path.
+
 On RADV the script sets `radv_cooperative_matrix2_nv=true` for its own process only (needed for FP8 matrix
 conversions), unless you already set it.
 
@@ -44,3 +51,6 @@ A new `fsr4fg-gpu-test.XXXXXX` folder holds:
 A synthetic scene is not Demon's Souls: textures, disocclusions, particles, camera motion and the HUD differ. GPU
 time here is AMD's work alone with nothing else on the GPU. It says nothing about frame pacing or latency in the game.
 The comparison is against an exact midpoint, not against AMD's Windows output.
+
+The `RESULT` line only asks for 1 dB over repeating and blending. A deliberately broken shader (R and G swapped in the
+forward motion pass) still passed it on the checker scene at 13.8 dB. Read the moving-area numbers and the pictures.

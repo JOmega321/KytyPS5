@@ -70,4 +70,20 @@ AMD's own output on real hardware.
   modules; matrix pipelines get full subgroups; a synthetic LUID is reported. A synthetic moving scene is scored
   against its exact in-between pictures (`FG-TEST.md`). CI probes AMD's providers through it on software Vulkan
   (llvmpipe: no FP8, so only 3.1.6 is offered; 3.1.6 itself fails to create there, llvmpipe having no wave32) and
-  packages it for real hardware. Execution of 4.0.2 on RDNA 4 is unverified until run there.
+  packages it for real hardware.
+
+### Measured: RX 9060 XT 16 GB, RADV (Mesa 26.2.5), 2560x1440 from 1280x720, synthetic scene
+
+| | FSR 4.0.2 | FSR 3.1.6 | blend | repeat |
+|---|---|---|---|---|
+| Moving areas, checker scene (dB vs exact midpoint) | 32.58 | 51.4 | 12.03 | 11.01 |
+| Moving areas, `--organic` (dB) | 41.02 | 51.73 | 18.87 | 16.88 |
+| Inside the objects, `--organic` | exact | exact | | |
+| GPU time, 2000 frames in a row, mean / p95 (ms) | 1.97 / 2.54 | 1.77 / 2.76 | | |
+| Video memory AMD reports (MB) | 119.8 | 78.8 | | |
+
+Pipelines: 195 for 4.0.2 (4.5 s with an empty shader cache, 0.1 s cached), 18 for 3.1.6. Output is byte-identical
+between runs and with or without full subgroups. Also run: 1920x1080 (2.1 ms) and 3840x2160 (6.3 ms), at scored-frame
+timing, not sustained. Not run: `mlfi_8k`, Vulkan validation layers (not installed here), AMD's Windows output as a
+reference, and anything in a game. FSR 4's remaining error against FSR 3 is at object borders and uncovered areas; the
+hard-edged rectangles here say little about either in real content.
