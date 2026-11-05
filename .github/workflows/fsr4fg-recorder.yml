@@ -1,7 +1,7 @@
 name: FSR 4 frame generation recorder
 on:
   push:
-    branches: [chen-kytyps5-fsr4-upscaler]
+    branches: [main]
     paths: ['tools/fsr4fg-vk/**', '.github/workflows/fsr4fg-recorder.yml', 'tests/fsr4fg-legalize.py', 'tests/fsr4fg-int64-images.py', 'tests/fsr4fg-self-test.py', 'tools/fsr412-vk/adapt_spirv.py',
             'tools/fsr412-vk/prune_bindings.py', 'tools/fsr412-vk/legalize_fp8.py', 'tools/fsr412-vk/build-fp8-tools.sh']
   workflow_dispatch:
