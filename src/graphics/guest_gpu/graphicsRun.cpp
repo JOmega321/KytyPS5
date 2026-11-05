@@ -10,6 +10,7 @@
 #include "graphics/guest_gpu/command_processor/pm4Dispatch.h"
 #include "graphics/guest_gpu/hardwareContext.h"
 #include "graphics/guest_gpu/pm4.h"
+#include "graphics/guest_gpu/scout.h"
 #include "graphics/host_gpu/pageManager.h"
 #include "graphics/host_gpu/bdaDirtyRegions.h"
 #include "graphics/host_gpu/renderer/pipeline/shaderReadObserver.h"
@@ -514,6 +515,7 @@ void CommandProcessor::WriteConstRam(uint32_t offset, const uint32_t* src, uint3
 
 void CommandProcessor::DumpConstRam(uint32_t* dst, uint32_t offset, uint32_t dw_num) {
 	memcpy(dst, m_const_ram + offset / 4, static_cast<size_t>(dw_num) * 4);
+	if (Scout::Running()) Scout::NoteHostWrite(reinterpret_cast<uint64_t>(dst), uint64_t {dw_num} * 4);
 }
 
 // KYTY_WRITE_GUARD (local/write-guard.h): an execution's command buffers over a guarded page read through the backing
@@ -622,6 +624,7 @@ static void WriteGuestMemory(void* dst, const void* src, uint32_t size) {
 	if (GuardedWrite(dst, src, size)) return;
 	AsyncUpload::Drain(/*serve=*/true);
 	std::memcpy(dst, src, size);
+	if (Scout::Running()) Scout::NoteWrite(dst, size);
 }
 
 bool TestWaitRegMemValue(uint64_t value, uint64_t ref, uint64_t mask, uint32_t func) {
@@ -659,6 +662,8 @@ void CommandProcessor::WaitRegMem(uint32_t func, const T* addr, T ref, T mask, u
 		SuspendPm4();
 	} else {
 		BdaDirtyRegions::Publish();
+		// KYTY_SCOUT=2: a wait the scout passes, on a word another writer changed (Scout::CheckWait).
+		if (Scout::Mode() == 2 && !IsAsyncComputeQueue() && Scout::Running()) Scout::CheckWait(addr, sizeof(T));
 	}
 }
 
@@ -765,6 +770,15 @@ void GuestGpu::Enqueue(Submission submission) {
 	Common::LockGuard lock(m_queue_mutex);
 	EXIT_IF(!m_accepting);
 	submission.frame_epoch = m_submitted_frame;
+	// (The scout follows queue 0's graphics submissions, each with the reset the command processor makes before it.)
+	if (submission.queue_id == 0 && submission.type == SubmissionType::Graphics) {
+		submission.scout_sequence = ++m_scout_sequence;
+		Scout::Feed(submission.scout_sequence, submission.commands, !submission.constant_commands.empty(),
+		            submission.reset_processor || m_scout_reset);
+		m_scout_reset = false;
+	} else if (submission.type == SubmissionType::FlipPreparation && submission.reset_processor) {
+		m_scout_reset = true;
+	}
 	LiveTrace::Event(LiveTrace::Submit, submission.queue_id | static_cast<uint32_t>(submission.type) << 8u,
 	                 submission.commands.size());
 	m_queues[submission.queue_id].push_back(std::move(submission));
@@ -803,6 +817,23 @@ void GuestGpu::ThreadRun(void* data) {
 	BdaDirtyRegions::g_translating = true;
 	LiveTrace::g_mark_thread = true;
 	InitializePerformanceSwitches();
+#if defined(__linux__)
+	// KYTY_WRITE_GUARD with the userfaultfd write watch (KYTY_UFFD_WP=1, the Steam Deck build's default unless 0;
+	// sysLinuxVirtual.cpp WriteWatchInit): the GPU thread faulted forever on a WAIT_REG_MEM label read before the menu
+	// (issue #289, the cause not found yet). The guard stays off with it.
+	if (WriteGuard::Enabled()) {
+		const char* uffd = std::getenv("KYTY_UFFD_WP");
+#if defined(KYTY_STEAM_DECK)
+		const bool watch = uffd == nullptr || uffd[0] == '\0' || uffd[0] == '1';
+#else
+		const bool watch = uffd != nullptr && uffd[0] == '1';
+#endif
+		if (watch) {
+			kyty_local_write_guard_mode.store(0, std::memory_order_relaxed);
+			std::printf("Write guard: off with the userfaultfd write watch (KYTY_UFFD_WP, issue #289)\n");
+		}
+	}
+#endif
 	AsyncUpload::g_serve_hook = [](bool serve) {
 		if (!serve) return ServeInWaits() && IsGpuThread();
 		if (!IsGpuThread() || !CommandsPending()) return false;
@@ -811,6 +842,8 @@ void GuestGpu::ThreadRun(void* data) {
 	};
 	LiveControl::Start();
 	XprCapture::Initialize();
+	// KYTY_SCOUT: not while a capture sees every draw on the normal path.
+	if (!XprCapture::Enabled()) Scout::Start(gpu->m_renderer.GetGpuResources());
 #ifdef KYTY_LOCAL_VULKAN_RECORDING
 	LocalVulkanRecording::ProducerScope recording;
 #endif
@@ -891,6 +924,7 @@ void GuestGpu::ThreadRun(void* data) {
 			}
 		}
 		if (should_stop) {
+			Scout::Stop();
 			gpu->m_gfx_cp->BufferWait();
 			gpu->m_renderer.GetMutex().ResignOwner();
 			g_gpu_state  = nullptr;
@@ -971,6 +1005,7 @@ bool GuestGpu::Process(Submission& submission) {
 
 	if (first_slice) {
 		submission.started = true;
+		if (submission.type == SubmissionType::Graphics && Scout::Running()) Scout::BeginSubmission(submission.scout_sequence);
 		cp.SetSubmitId(++m_submit_id);
 		cp.ResetDeCe();
 		cp.SetFlip({});
@@ -1158,6 +1193,9 @@ void CommandProcessor::ProcessPm4(Pm4Execution& execution, size_t stop_depth) {
 			     total_dw - remaining_dw, packet_header, opcode, KYTY_PM4_LEN(packet_header));
 		}
 
+		// KYTY_SCOUT: queue 0's draws, numbered as the scout numbers them (skipped ones too).
+		if (Scout::IsDraw(opcode) && !IsAsyncComputeQueue() && Scout::Running()) Scout::NoteDraw(packet);
+
 		if ((packet_header & 1u) != 0 && ShouldSkipPredicatedPackets()) {
 			auto packet_dw = KYTY_PM4_LEN(packet_header);
 #ifdef KYTY_LOCAL_VULKAN_RECORDING
@@ -1240,6 +1278,7 @@ void CommandProcessor::ProcessPm4(Pm4Execution& execution, size_t stop_depth) {
 				    TryNativeXprDraws({packet, remaining_dw}, DrawStateObserver::g_shadow.last_clean);
 				if (consumed) {
 					m_draw_run_skip = 0;
+					if (Scout::Running() && !IsAsyncComputeQueue()) Scout::SkipDraws(consumed / 5u - 1u);
 					execution.m_buffer_stack[buffer_index].offset_dw += consumed;
 					execution.m_made_progress = true;
 					GetScheduler().CompleteDraws(consumed / 5u);
@@ -1310,6 +1349,7 @@ void CommandProcessor::ProcessPm4(Pm4Execution& execution, size_t stop_depth) {
 		if (packet_header == 0xc0032500u && !GraphicsRunDebugDumpEnabled()) {
 			const auto consumed = TryDrawIndirectRun({packet, remaining_dw});
 			if (consumed) {
+				if (Scout::Running() && !IsAsyncComputeQueue()) Scout::SkipDraws(consumed / 5u - 1u);
 				execution.m_buffer_stack[buffer_index].offset_dw += consumed;
 				execution.m_made_progress = true;
 				GetScheduler().CompleteDraws(consumed / 5u);
@@ -2454,6 +2494,7 @@ void CommandProcessor::Flip(void* dst_gpu_addr, uint32_t value) {
 	}
 
 	std::memcpy(dst_gpu_addr, &value, sizeof(value));
+	if (Scout::Running()) Scout::NoteHostWrite(reinterpret_cast<uint64_t>(dst_gpu_addr), sizeof(value));
 	auto& command = CurrentBuffer();
 	HudAnchor::NoteFlip();
 	auto request = Sync::PrepareVideoOutFlip(command, m_flip.handle, m_flip.index, m_flip.flip_mode,
@@ -2482,6 +2523,7 @@ void CommandProcessor::FlipWithInterrupt(uint32_t eop_event_type, uint32_t cache
 		EXIT("unknown event type\n");
 	}
 	std::memcpy(dst_gpu_addr, &value, sizeof(value));
+	if (Scout::Running()) Scout::NoteHostWrite(reinterpret_cast<uint64_t>(dst_gpu_addr), sizeof(value));
 	auto& command = CurrentBuffer();
 	HudAnchor::NoteFlip();
 	auto request = Sync::PrepareVideoOutFlip(command, m_flip.handle, m_flip.index, m_flip.flip_mode,
