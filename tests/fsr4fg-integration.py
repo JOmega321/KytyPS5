@@ -62,6 +62,8 @@ expect(text("src/local/fsr4-framegen.cpp").count("AboveGuest") == 2, "AMD's imag
 # On a game version without its interface shaders listed, FSR finds no HUD canvas: they can be found and given without a build.
 hud = text("src/local/hud-anchor.h")
 expect("KYTY_HUD_CANVAS_SHADERS" in hud and "KYTY_HUD_SHADER_LOG" in hud, "the HUD's shaders can be logged and added on another game version")
+expect(hud.count("CanvasOnlyShaders") == 4 and "0x4777e49f58036a48ULL" in hud, "01.005.000's interface shaders find its canvas")
+expect("0x4777e49f58036a48ULL" not in hud[hud.index("ClipShaders {"):hud.index("PixelShader =")], "and stay out of the layout code, which is 01.007.000's")
 run = text("src/graphics/guest_gpu/graphicsRun.cpp")
 expect(run.count("HudAnchor::LogTargetDraw(") == run.count("HudAnchor::Classify("), "every interface draw path logs")
 

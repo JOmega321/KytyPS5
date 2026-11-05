@@ -267,6 +267,11 @@ inline bool  OutputTarget(const HW::Context& ctx);
 // (FrameGen::NoteUiCanvas). With the interface scaled to KYTY_OUTPUT_HEIGHT's output the canvas is the output's size
 // (OutputTarget): at 1440 FSR found none and generated the HUD too, which flickered (issue #170). With the wide output
 // the HUD's canvas is as wide as it (WideWidth; issue #250, the same ghosting at 32:9).
+// 01.005.000's interface shaders (KYTY_HUD_SHADER_LOG's run): each draws only into its 2560x1440 canvas at 1440 output.
+// Only the canvas is found by them: Classify's vertex layouts are 01.007.000's, so they stay out of ClipShaders.
+constexpr std::array<uint64_t, 5> CanvasOnlyShaders {0x4777e49f58036a48ULL, 0x80184a86ffead01eULL, 0xfa714c85e3490ed0ULL,
+                                                     0xfb14ebf198c97722ULL, 0x753acdad282c81a7ULL};
+
 inline void NoteCanvas(const HW::Context& ctx, const HW::VertexShaderInfo& vs) {
 	const auto&    target = ctx.GetRenderTarget(0);
 	const uint32_t width  = WideWidth() != 0 ? WideWidth() : CanvasWidth();
@@ -276,7 +281,7 @@ inline void NoteCanvas(const HW::Context& ctx, const HW::VertexShaderInfo& vs) {
 	if (target.base.addr == 0 || !canvas) return;
 	const uint64_t hash = HashAt(vs.es_regs.data_addr);
 	// KYTY_HUD_CANVAS_SHADERS=<hex,hex,...>: more interface vertex shaders, for a version of the game whose differ (the
-	// ones above are 01.007.000's; KYTY_HUD_SHADER_LOG finds them).
+	// ones above are 01.007.000's and 01.005.000's; KYTY_HUD_SHADER_LOG finds them).
 	static const std::vector<uint64_t> extra = [] {
 		std::vector<uint64_t> hashes;
 		const char*           text = std::getenv("KYTY_HUD_CANVAS_SHADERS");
@@ -290,6 +295,7 @@ inline void NoteCanvas(const HW::Context& ctx, const HW::VertexShaderInfo& vs) {
 		return hashes;
 	}();
 	if (hash == PixelShader || std::find(ClipShaders.begin(), ClipShaders.end(), hash) != ClipShaders.end() ||
+	    std::find(CanvasOnlyShaders.begin(), CanvasOnlyShaders.end(), hash) != CanvasOnlyShaders.end() ||
 	    std::find(extra.begin(), extra.end(), hash) != extra.end())
 		FrameGen::NoteUiCanvas(target.base.addr);
 }
