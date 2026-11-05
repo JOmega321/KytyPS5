@@ -969,13 +969,14 @@ struct Presenter::Impl {
 			}
 			return true;
 		};
-		// FSR: a generated frame shows only once the GPU has made it, and the game's frame after it has no such wait, so timed
-		// from the submit they would land at half a frame less and more that work's time. Timed from its end they are even,
-		// the game's frame that much later. KYTY_FG_PACE_GPU=0: from the submit. (MangoHud and the like time the present
-		// call, not the flip: they do not show this, and show the even frames as uneven ones.)
+		// FSR: frames are timed from the submit. KYTY_FG_PACE_GPU=1 times the game's frame from the end of the generated frame's
+		// GPU work instead, which should even their flips out, the game's frame that much later. Compared by eye (RX 9060 XT,
+		// Demon's Souls) the submit looked very similar and a bit smoother, so it stays the default; no flip times were
+		// measured. (MangoHud and the like time the present call, not the flip: they cannot settle this, their graph being
+		// flat from the submit and uneven from the GPU's end whatever the flips do.)
 		static const bool pace_gpu = [] {
 			const char* value = std::getenv("KYTY_FG_PACE_GPU");
-			return value == nullptr || value[0] != '0';
+			return value != nullptr && value[0] != '\0' && value[0] != '0';
 		}();
 		auto     start = std::chrono::steady_clock::now();
 		uint32_t shown = 0;

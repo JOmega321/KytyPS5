@@ -15,7 +15,7 @@ void GameFrame();
 // Present thread, around frame generation's recording into `command`.
 void BeginGenerate(GraphicContext& graphics, vk::CommandBuffer command);
 void EndGenerate(vk::CommandBuffer command, uint32_t generated_frames, const char* name);
-// Present thread: how long the frame's GPU work took to end after its generated frame was presented (KYTY_FG_PACE_GPU).
+// Present thread: how long the frame's GPU work took to end after its generated frame was presented (KYTY_FG_PACE_GPU=1).
 void NotePaceWait(double ms);
 
 } // namespace Libs::Graphics::FrameCsv

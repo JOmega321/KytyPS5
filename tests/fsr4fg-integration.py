@@ -67,7 +67,8 @@ expect("0x4777e49f58036a48ULL" not in hud[hud.index("ClipShaders {"):hud.index("
 run = text("src/graphics/guest_gpu/graphicsRun.cpp")
 expect(run.count("HudAnchor::LogTargetDraw(") == run.count("HudAnchor::Classify("), "every interface draw path logs")
 
-# Timed from the GPU's end by default, and the old timing one switch away.
+# Timed from the submit by default, and from the GPU's end one switch away.
 present = text("src/graphics/presentation/window/swapchain.cpp")
-expect("KYTY_FG_PACE_GPU" in present and "present_scheduler.Wait(frame.present_tick);" in present, "generated frames are paced from the GPU's end")
+expect("value != nullptr && value[0] != '\\0' && value[0] != '0'" in present and "pace_gpu && FrameGen::FsrMarksHud()" in present,
+       "generated frames are paced from the submit unless KYTY_FG_PACE_GPU asks for the GPU's end")
 print("fsr4fg integration: OK")
