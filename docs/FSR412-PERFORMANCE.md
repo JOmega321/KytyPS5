@@ -1,6 +1,6 @@
 # Native Linux FSR 4 performance work
 
-Branch: `chen-kytyps5-fsr4-upscaler`, based on `a897c60f` (Chen through `2a439236`).
+Branch: `main` (formerly `chen-kytyps5-fsr4-upscaler`), based on `a897c60f` (Chen through `2a439236`).
 Existing FSR 4.1.2 assets remain valid. No asset regeneration, cache deletion, settings
 migration or worker-default change is required. The launcher, fallback reporting,
 automatic RADV FP8 option, watermark, sharpening and branding remain unchanged.

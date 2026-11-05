@@ -1,6 +1,6 @@
 # Experimental native FSR 4.1.2 INT8 and FP8
 
-Branch: `chen-kytyps5-fsr4-upscaler`, consolidating the INT8 and FP8 work.
+Branch: `main` (formerly `chen-kytyps5-fsr4-upscaler`), consolidating the INT8 and FP8 work.
 
 ## Use the AppImage
 

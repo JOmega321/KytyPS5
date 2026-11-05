@@ -1,7 +1,7 @@
 # chenxiao07 Linux AppImage
 
 Upstream integrated through chenxiao07/KytyPS5 commit `d7533c3805267c74e7171c1e52a6d94073bf914c`.
-The `chen-kytyps5-fsr4-upscaler` branch adds native FSR 4.1.2 and AppImage packaging.
+The `main` branch (formerly `chen-kytyps5-fsr4-upscaler`) adds native FSR 4.1.2 and AppImage packaging.
 
 The application is named **Demon's Souls (KyTy)** in Gear Lever, the desktop menu
 and the Linux launcher. Its blue soul-wisp PNG is embedded at the AppDir root,
