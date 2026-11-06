@@ -662,6 +662,10 @@ bool RestoreGuestWritable(uint64_t /*vaddr*/, uint64_t /*size*/) {
   return false;
 }
 
+bool RestoreGuestProtection(uint64_t /*vaddr*/, uint64_t /*size*/) {
+  return false; // This fixture has no guest address space.
+}
+
 } // namespace Libs::LibKernel::Memory
 
 int main(int argc, char **argv) {

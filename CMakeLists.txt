@@ -772,7 +772,7 @@ target_compile_definitions(virtual_memory_allocation_tests PRIVATE
 
 # These tests use exceptions.
 if(NOT KYTY_CLANG_CL)
-	foreach(kyty_exception_test scalar_provenance_tests resource_tracking_tests
+	foreach(kyty_exception_test lane_local_tests scalar_provenance_tests resource_tracking_tests
 			virtual_memory_allocation_tests)
 		target_compile_options(${kyty_exception_test} PRIVATE -fexceptions)
 	endforeach()
@@ -1054,9 +1054,10 @@ if((LINUX OR WIN32) AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
 	endforeach()
 	add_executable(vulkan_recording_tests EXCLUDE_FROM_ALL
 		"${KYTY_TESTS_DIR}/VulkanRecordingTests.cpp"
+		"${KYTY_SOURCE_DIR}/local/local-platform.cpp"
 		"${KYTY_SOURCE_DIR}/local/vulkan-recording.cpp" "${recording_generated}")
 	target_include_directories(vulkan_recording_tests PRIVATE ${inc_headers} "${CMAKE_CURRENT_BINARY_DIR}")
-	target_link_libraries(vulkan_recording_tests PRIVATE Threads::Threads Vulkan::Headers)
+	target_link_libraries(vulkan_recording_tests PRIVATE Threads::Threads Vulkan::Headers ${CMAKE_DL_LIBS})
 
 	foreach(native_resource_target kyty_emulator kyty_shader_precompile shader_recompiler_compute_tests shader_cfg_tests
 			resource_tracking_tests resource_materialization_tests virtual_memory_allocation_tests pad_input_tests)
