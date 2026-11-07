@@ -1,3 +1,15 @@
+## Fork integration of Chen's 2026-11-07 updates
+
+Changes through `cd242926` add keyboard/mouse prompts and the layout editor to the Linux launcher, fix the older
+Windows FSR runtime's fullscreen/resize hang, correct headphone passthrough channels, and let the game continue
+without draws whose graphics pipelines the driver refuses. Rejected draws may leave visual elements missing;
+compute pipeline failures still stop the game.
+
+The Linux launcher retains the FSR4 Setup page alongside the new keyboard editor. Native Linux FSR4 INT8/FP8
+upscaling, FSR4 frame generation and its FSR3 fallback, HUD detection and pacing are retained. The fork's Linux APR
+file retention and bounded asset prefetch changes from `efe4b34e` are also retained. These branch updates are newer
+than Chen's published v20261106 release.
+
 ## Fork integration of v20261106
 
 Chen's changes through `06cf66ce` are incorporated while retaining this fork's experimental native Linux FSR 4

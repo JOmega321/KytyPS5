@@ -4,6 +4,7 @@
 #include "commands.h"
 #include "asset-builder.h"
 #include "game.h"
+#include "keyboard_editor.h"
 #include "platform.h"
 
 #include <atomic>
@@ -41,9 +42,10 @@ public:
 	[[nodiscard]] bool WantsClose() const { return close_; }
     void PrepareFsrAssets(const std::string& dll);
     bool AssetBuildRunning() const { return fsr_builder_.Snapshot().running || fsr4fg_builder_.Snapshot().running; }
-	// (--screenshot.)
-	void               ShowPage(int index) { page_ = index; }
+	// (--screenshot: the pages, then the keyboard controls editor over the Game page.)
+	void               ShowPage(int index);
 	static int         PageCount() { return 8; }
+	static int         ScreenshotCount() { return PageCount() + 1; }
 	static const char* PageName(int index);
 
 	// Called from other threads when their work is done: wakes the window up (an SDL user event).
@@ -120,6 +122,7 @@ private:
 	LauncherContext& context_;
 	Commands         commands_;
 	SDL_Renderer*    renderer_;
+	KeyboardEditor   keyboard_editor_; // Game page: Keyboard controls
 
 	ImFont* sans_          = nullptr;
 	ImFont* serif_         = nullptr;
