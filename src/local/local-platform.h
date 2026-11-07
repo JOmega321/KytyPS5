@@ -46,20 +46,22 @@ std::vector<std::pair<uint32_t, std::string>> ProcessThreads();
 
 // A read-only host file kept open (one handle a path) and its size, for positional reads from any thread
 // (ReadOpenFileAt) until the call's DoneKeptReadFile; once unread for a while it is closed (Windows: 10 s,
-// KYTY_FILE_IDLE_CLOSE=<seconds>, 0 never) and a later call opens it again. 0: it cannot be opened, or (Linux) none are
-// kept: open it for each read.
+// KYTY_FILE_IDLE_CLOSE=<seconds>, 0 never) and a later call opens it again. Linux also evicts idle files at its
+// descriptor cap (KYTY_FILE_OPEN_MAX; default 512, limited by RLIMIT_NOFILE). KYTY_KEPT_FILES=0 disables Linux retention.
+// 0: it cannot be retained/opened; open it for each read.
 uint64_t OpenKeptReadFile(const std::string& path, uint64_t* size);
 // Up to `size` bytes at `offset` of a kept file; the bytes read (0 at the end or on an error).
 uint32_t ReadOpenFileAt(uint64_t file, uint64_t offset, void* buffer, uint32_t size);
 // The reads of an OpenKeptReadFile call ended (each call that returned a file has one): its handle is not used any more.
 void DoneKeptReadFile(const std::string& path);
-// A kept file read whole once, in the background (the first call for the path; Windows only): its later reads come from
-// the system file cache.
+// A kept file read in the background (the first call for the path): its later reads come from the system file cache.
+// Linux: one low-priority worker, at most 16 MiB per stream and 32 MiB/32 files pending; KYTY_FILE_PREFETCH=0 disables it.
 void PrefetchKeptFile(const std::string& path);
-// The game's file opens followed (Windows; once, KYTY_FILE_FOLLOW=0: not): `recording` lists the files OpenKeptReadFile
+// The game's file opens followed (once, KYTY_FILE_FOLLOW=0: not): `recording` lists the files OpenKeptReadFile
 // opened in earlier sessions in the order first opened (one a line, relative to `root` where under it; this session's
 // new ones appended). Each one the game opens, or first reads after it was opened here, has the 1024 recorded after it
-// opened on threads of their own, ahead of the game's reads.
+// opened on threads of their own, ahead of the game's reads. Linux uses the same recording but warms only 256 KiB of
+// the next 8 files on its single worker (KYTY_FILE_FOLLOW_WINDOW overrides the window, up to 32).
 void FollowKeptFiles(const std::string& recording, const std::string& root);
 
 // Stack bounds of the calling thread; false when unknown.

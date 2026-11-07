@@ -23,6 +23,10 @@ jobs:
           sudo apt-get install -y --no-install-recommends clang-18 lld-18 llvm-18 ccache ninja-build cmake spirv-tools python3 python3-full glslang-tools patchelf desktop-file-utils xvfb xauth x11-utils fonts-dejavu-core libvulkan1 libgl1-mesa-dev libx11-dev libxcursor-dev libxext-dev libxfixes-dev libxi-dev libxrandr-dev libxss-dev libxkbcommon-dev libasound2-dev libpulse-dev libudev-dev libdbus-1-dev libwayland-dev wayland-protocols
       - name: Test asset-builder process handling
         run: |
+          clang++-18 -std=c++20 -O2 -Wall -Wextra -Werror -pthread -Isrc/local src/local/kept-files-linux.cpp tests/KeptFilesLinuxTests.cpp -o /tmp/test-kept-files
+          /tmp/test-kept-files
+          /tmp/test-kept-files --disabled
+          /tmp/test-kept-files --fd-zero
           clang++-18 -std=c++20 -pthread -Ilauncher-linux launcher-linux/asset-builder.cpp tests/launcher-asset-builder.cpp -o /tmp/test-asset-builder
           /tmp/test-asset-builder
           bash -n tools/fsr412-vk/build_assets.sh tools/fsr4fg-vk/build_assets.sh packaging/chen-appimage/AppRun

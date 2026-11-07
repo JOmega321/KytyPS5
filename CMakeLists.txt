@@ -439,6 +439,7 @@ list(APPEND kyty_emulator_src
 	"${KYTY_SOURCE_DIR}/emulator.cpp"
 	"${KYTY_SOURCE_DIR}/local/local-platform.h"
 	"${KYTY_SOURCE_DIR}/local/local-platform.cpp"
+	"${KYTY_SOURCE_DIR}/local/kept-files-linux.cpp"
 	"${KYTY_SOURCE_DIR}/local/frame-gen.h"
 	"${KYTY_SOURCE_DIR}/local/frame-gen.cpp"
 	"${KYTY_SOURCE_DIR}/local/frame-gen-hudless.h"
@@ -925,6 +926,17 @@ if(WIN32)
 endif()
 
 if(LINUX)
+	add_executable(kept_files_linux_tests EXCLUDE_FROM_ALL
+		"${KYTY_TESTS_DIR}/KeptFilesLinuxTests.cpp"
+		"${KYTY_SOURCE_DIR}/local/kept-files-linux.cpp")
+	target_include_directories(kept_files_linux_tests PRIVATE "${KYTY_SOURCE_DIR}/local")
+	target_link_libraries(kept_files_linux_tests PRIVATE Threads::Threads)
+	if(BUILD_TESTING)
+		add_dependencies(kyty_tests kept_files_linux_tests)
+		add_test(NAME kept_files_linux COMMAND kept_files_linux_tests)
+		add_test(NAME kept_files_linux_disabled COMMAND kept_files_linux_tests --disabled)
+		add_test(NAME kept_files_linux_fd_zero COMMAND kept_files_linux_tests --fd-zero)
+	endif()
 	set_property(SOURCE
 		"${KYTY_SOURCE_DIR}/graphics/guest_gpu/graphicsRun.cpp"
 		"${KYTY_SOURCE_DIR}/graphics/host_gpu/renderer/commandScheduler.cpp"
@@ -937,6 +949,7 @@ if(LINUX)
 		"${KYTY_SOURCE_DIR}/graphics/shader/shader.cpp"
 		"${KYTY_SOURCE_DIR}/loader/redZonePatcher.cpp"
 		"${KYTY_SOURCE_DIR}/local/local-platform.cpp"
+		"${KYTY_SOURCE_DIR}/local/kept-files-linux.cpp"
 		"${KYTY_SOURCE_DIR}/local/static-seeds.cpp"
 		"${KYTY_SOURCE_DIR}/libs/libAudio2.cpp"
 		"${KYTY_SOURCE_DIR}/libs/libKernel.cpp"

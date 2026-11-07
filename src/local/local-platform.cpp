@@ -2115,6 +2115,7 @@ int CurrentThreadPriority() {
 	return 0;
 }
 
+#if !defined(__linux__)
 uint64_t OpenKeptReadFile(const std::string& /*path*/, uint64_t* /*size*/) {
 	return 0;
 }
@@ -2128,6 +2129,7 @@ void DoneKeptReadFile(const std::string& /*path*/) {}
 void PrefetchKeptFile(const std::string& /*path*/) {}
 
 void FollowKeptFiles(const std::string& /*recording*/, const std::string& /*root*/) {}
+#endif
 
 std::vector<std::pair<uint32_t, std::string>> ProcessThreads() {
 	return {};

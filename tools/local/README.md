@@ -39,3 +39,26 @@ Building, running and the developer's workflow are in [docs/CURRENT-PLAYABLE.md]
 - [PGO](PGO.md): the profile the release build uses and how to retrain it (`windows/pgo-train.ps1`).
 
 Keep reusable tools here and one-off scripts out of the repository; git keeps the history of the removed ones.
+
+## Linux file streaming
+
+Loose game assets use cached read-only descriptors and positional reads, reusing APR's per-thread staging buffer.
+One worker at background CPU/I/O priority prefetches small audio streams (up to 16 MiB) and the first 256 KiB of
+recorded upcoming assets. The queue is bounded to 32 files and 32 MiB, including the active job. Guest memory writes
+still use APR's existing overwrite preparation and copy path. Archive reads keep their existing implementation.
+
+- `KYTY_KEPT_FILES=0`: compare against the original open/read/close path.
+- `KYTY_FILE_PREFETCH=0`: retain descriptors without background read-ahead.
+- `KYTY_FILE_FOLLOW=0`: disable recording-based look-ahead, retaining audio-stream prefetch.
+- `KYTY_FILE_OPEN_MAX`: descriptor cap (default 512, maximum 4096, further limited by the process's open-file limit).
+  Active readers are never evicted; cache pressure falls back to ordinary APR reads.
+- `KYTY_FILE_IDLE_CLOSE`: idle retention in seconds (default 10; 0 disables expiry, but capacity eviction still applies).
+- `KYTY_FILE_FOLLOW_WINDOW`: recorded successors to warm (default 8, maximum 32).
+
+File-order recordings live under `_PipelineCache/files/<title>_<version>.files`. New recordings benefit the next
+session; shipped recordings can seed the first. Files are treated as immutable for the lifetime of a retained
+descriptor. No textures, shader caches, saves, or guest synchronization rules are changed by this path.
+
+Build `kept_files_linux_tests` and run `ctest -R kept_files_linux --output-on-failure` in the build directory.
+Compare the same loading/traversal route with retention and prefetch independently disabled; count slow APR reads
+and frame hitches, as well as memory pressure. A successful build is not a measured gameplay speedup.
