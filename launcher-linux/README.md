@@ -5,11 +5,16 @@ Dear ImGui on SDL2's renderer. Both are linked in statically (the emulator's own
 needs nothing installed beyond what the emulator needs. `build-linux.sh` builds it next to `kyty_emulator`, and the
 Linux package carries it.
 
+This fork retains eight navigation pages, including **FSR4 setup**. The keyboard controls editor opens as a modal
+from **Game → Keyboard controls → Edit controls…**, alongside the optional in-game keyboard/mouse prompts.
+
 It reads and writes `launcher-settings.json` next to `run_ds.sh`, with the Windows launcher's keys (unknown keys are kept),
 or in `$XDG_CONFIG_HOME/KytyPS5/` when that folder is read-only. PLAY starts `run_ds.sh` in a terminal window with
 the settings as the emulator's switches, its output also in `logs/<time>.log` (`_Build/run-logs/` in a build tree).
 The precompile and DLSS's build (`precompile-linux.sh`, `get-dlss-linux.sh`) run in a terminal window too, where they
 can ask y/N and for the sudo password.
+The AppImage instead keeps its settings and other writable state in its
+[AppImage data folder](../packaging/chen-appimage/README.md); replacing the AppImage preserves that state.
 
 ```
 ./kyty_launcher                the window
@@ -31,7 +36,9 @@ can ask y/N and for the sudo password.
 | | Up to 120 fps | `KYTY_VBLANK=120` (run_ds.sh adds `gameMinDeltaTime`) |
 | | VSync | `PRESENT_MODE=Fifo` (run_ds.sh's mailbox otherwise) |
 | | Low latency | `KYTY_LOW_LATENCY=1` |
-| Graphics | Upscaler DLSS / FSR 3 | `KYTY_UPSCALER=dlss` / `fsr` |
+| Graphics | Upscaler DLSS / FSR 3 / FSR 4.1.2 | `KYTY_UPSCALER=dlss` / `fsr` / `fsr4` |
+| | FSR 4 precision INT8 / FP8 | `KYTY_FSR4_PRECISION=int8` / `fp8`; FP8 also requests RADV matrix conversions |
+| | FSR 4 status watermark | `KYTY_FSR4_WATERMARK=1` / `0` |
 | | 3D render height | `KYTY_RENDER_HEIGHT` |
 | | Game output 1080p (or Automatic for a 16:9 window up to 1080 lines) | `KYTY_HD_OUTPUT=1` |
 | | Game output 1440p (with DLSS or FSR 3) | `KYTY_OUTPUT_HEIGHT=1440` |
@@ -42,6 +49,7 @@ can ask y/N and for the sudo password.
 | | DLSS frame generation 2x-6x | `KYTY_FRAMEGEN=1`-`5` |
 | | DLSS runtime | runs `get-dlss-linux.sh <the emulator's folder>` |
 | | AMD FSR 3 frame generation | `KYTY_FRAMEGEN=1`, `KYTY_FRAMEGEN_BACKEND=fsr` |
+| | FSR 4 frame generation (experimental, with prepared assets) | also `KYTY_FSR4FG_DIR` and `radv_cooperative_matrix2_nv=true`; FSR 3 fallback |
 | Game | Console language | `--console-language` |
 | | Audio output | `KYTY_AUDIO_OUTPUT` |
 | | Keyboard and mouse prompts | key-cap icons in the game folder, and `--keymap` pairs added last (see below) |
@@ -57,6 +65,7 @@ can ask y/N and for the sudo password.
 | Experimental | Lock to 30 fps | `KYTY_FLIP_RATE=1` |
 | | Direct presentation | `KYTY_PRESENT_DIRECT=1` |
 | | AMD Anti-Lag | `KYTY_ANTI_LAG=1`, `KYTY_LOW_LATENCY=1` |
+| FSR4 setup | Upscaler and frame-generation asset preparation | separate AMD DLL inputs and preparation controls |
 
 The game is `KYTY_GAME`, the emulator `KYTY_BIN` (the `kyty_emulator` next to the launcher, or `KYTY_BIN` when the
 launcher was started with it). The variables above that a start does not set are unset, so what the shell exported
@@ -68,6 +77,15 @@ one is installed, else a built-in one.
 
 The Windows launcher's red-zone protection, Streamline folder and "Keep memory resident" are Windows-only and not shown;
 their keys stay in the file.
+
+## FSR4 setup
+
+Prepare upscaling and frame-generation files in separate sections of **FSR4 setup**, then select the features in
+**Graphics**. Upscaling uses `amd_fidelityfx_upscaler_vk.dll`; frame generation uses
+`amd_fidelityfx_framegeneration_vk.dll`. Both inputs are checked against pinned SDK 2.4.0 hashes.
+Selecting FSR4 frame generation does not select FP8 upscaling. Preparing files alone does not enable either feature.
+See [native upscaling](../docs/FSR412-LINUX.md) and [native frame generation](../tools/fsr4fg-vk/README.md#in-the-emulator)
+for feature requirements, runtime status and fallback behavior.
 
 ## Keyboard and mouse prompts
 
@@ -92,6 +110,7 @@ Sans or Noto Sans work, a CFF/OpenType-only font does not) to look like the pack
 font only the default layout's icons can be applied, and the editor says so.
 
 `--dry-run` reports the option (`prompts:`) and prints the `--keymap` pairs it would pass; it changes no file.
-`--screenshot` also draws the editor (`keyboard-controls`). The tests need no game or ImGui:
-`cmake --build <build> --target kyty_launcher_prompts_tests && ctest -R launcher_keyboard_prompts`
+Create the output folder before using `--screenshot`. It writes the eight navigation pages, including
+`8-fsrsetup.bmp`, then the editor as `9-keyboard-controls.bmp`. The tests need no game or ImGui:
+`cmake --build <build> --target kyty_launcher_prompts_tests && ctest --test-dir <build> -R launcher_keyboard_prompts --output-on-failure`
 (configured with `-DBUILD_TESTING=ON`).

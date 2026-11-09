@@ -24,7 +24,17 @@ Share and touchpad-swipe textures are left alone. `labels.json` documents the sh
 
 ![Optional keyboard prompt setting on the Game page](https://github.com/user-attachments/assets/10920d72-a5b8-4034-8291-473dac9e1434)
 
-In the Windows launcher (the Linux launcher has the same option and uses these same files, see `launcher-linux/README.md`), open **Game → Keyboard and mouse prompts**. It is off by default. Enabling it applies the bundled icons and matching controls when you press **Play**, including launcher's `--play` shortcut mode. Disabling it restores the original icons on the next **Play** and stops adding the bindings. The launcher passes `-KeyboardMouseControls` and an encoded layout through `-KeyboardMouseBindings` to `run-windows.ps1`, which appends the matching `--keymap` pairs after the configured bindings. These take precedence for conflicting controls/keys; mouse sensitivity and non-conflicting wheel bindings remain unchanged. It never rewrites `launch.json`, so disabling the option returns to your configured controls (or emulator defaults). With this layout, Space goes to the game; use the Pause key to pause emulation. Simply changing the toggle does not modify any files.
+In either the Windows or Linux launcher, open **Game → Keyboard and mouse prompts**. It is off by default.
+Enabling it applies the bundled icons and matching controls when you press **Play**, including the launcher's
+`--play` shortcut mode. Disabling it restores the original icons on the next **Play** and stops adding the bindings.
+The saved layout's `--keymap` pairs take precedence for conflicting controls/keys; mouse sensitivity and
+non-conflicting wheel bindings remain unchanged. It never rewrites `launch.json`, so disabling the option returns
+to your configured controls (or emulator defaults). With this layout, Space goes to the game; use Pause to pause
+emulation. Simply changing the toggle does not modify game files.
+
+The Windows launcher passes `-KeyboardMouseControls` and an encoded layout through `-KeyboardMouseBindings`
+to `run-windows.ps1`. The Linux launcher applies the same icon pack and appends the layout's `--keymap` pairs
+to its `run_ds.sh` launch. See the [Linux launcher guide](../../launcher-linux/README.md#keyboard-and-mouse-prompts).
 
 ### Edit controls locally
 
@@ -44,7 +54,7 @@ This option supports an extracted **PPSA01341 version 01.007.000** folder with t
 
 If applying stops halfway, close the game, turn this option off and press **Play** for the same folder to restore originals from `.kyty-keyboard-prompts-v1`. Keep that backup folder. Missing or damaged backups must be recovered from your own original game files first.
 
-If you previously installed these icons manually, restore your original icons first so the launcher can create a verified backup. Switching to another game folder does not restore the old folder automatically: disable the option and press Play for that old folder first. Directly starting the emulator or `run-windows.ps1` bypasses the launcher option.
+If you previously installed these icons manually, restore your original icons first so the launcher can create a verified backup. Switching to another game folder does not restore the old folder automatically: disable the option and press Play for that old folder first. Directly starting the emulator, `run-windows.ps1` or `run_ds.sh` bypasses the launcher option.
 
 The launcher includes generated CTXR artwork and needs no extra tools or downloads. No original controller artwork is bundled. The standalone instructions below are for rebuilding/customizing the assets.
 

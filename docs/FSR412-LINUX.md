@@ -23,7 +23,8 @@ unavailable, the game reports the reason and attempts FSR 4.1.2 INT8. If that is
 also unavailable, it retains the existing FSR 3.1 fallback. The launcher footer
 reports the selected option; the in-game watermark reports runtime use. Saved
 FP8 selections also enable matrix conversions even if the old toggle was off.
-INT8 and other upscalers do not enable this option. Advanced Extra options can
+INT8 and other upscalers do not enable this option on their own; selecting prepared FSR4 frame generation also
+requests it independently of the upscaler. Advanced Extra options can
 still explicitly override generated launch variables. The
 legacy benchmark variable `BB_FSR411_VARIANT` cannot override the menu choice.
 
@@ -53,8 +54,9 @@ Both precisions use the same `DemonsSoulsSuperResolution::Install` PS5 Pro
 constructor patch and display mode 5 as FSR 3.1, consuming that path's scene
 color, depth, motion vectors, jitter and reset state. Scene color remains
 RGBA16F, motion RG16F; output supports RGBA16F and the game's packed
-B10G11R11 HDR view. Internal history stays RGBA16F. This does not add FSR4 frame
-generation; the existing frame-generation backend remains in use.
+B10G11R11 HDR view. Internal history stays RGBA16F. Upscaling and frame generation are separate selections.
+This fork also provides [native FSR4 frame generation](../tools/fsr4fg-vk/README.md#in-the-emulator), using its
+own DLL, prepared assets and startup self-test, with FSR3 as the fallback. Choosing it does not select FP8 upscaling.
 
 The four normal/Ultra Performance families cover both output tiers through
 3840x2160, including 2560x1440. CPU host captures on explicitly synthetic

@@ -1,4 +1,15 @@
 > [!NOTE]
+> **JOmega321's Linux AppImage fork:** download the AppImage artifact from a successful
+> [chenxiao07 AppImage workflow run](https://github.com/JOmega321/KytyPS5/actions/workflows/chen-appimage.yml).
+> The `main` branch includes Chen's updates through `cd242926` (2026-11-07), native Linux FSR 4.1.2 INT8/FP8
+> upscaling, experimental FSR 4 frame generation, and Linux APR file retention/prefetch.
+> The Linux launcher includes **Game → Keyboard controls** and optional **Keyboard and mouse prompts**;
+> prompt replacement requires an extracted PPSA01341 **01.007.000** folder. The **FSR4 setup** page remains available.
+> See [AppImage installation and updates](packaging/chen-appimage/README.md),
+> [Linux launcher controls](launcher-linux/README.md), and [fork integration notes](docs/RELEASE-NOTES.md).
+> Settings, saves, caches and prepared FSR assets remain in the existing AppImage data folder when updating.
+
+> [!NOTE]
 > **This fork is tuned for Demon's Souls.** Its renderer, shader and memory paths are optimized for
 > **Demon's Souls (PS5, PPSA01341), game versions 1.07 (01.007.000) and 1.05 (01.005.000)**: both are
 > supported, with the same performance patches (each version precompiles its own shader caches); other
@@ -9,8 +20,8 @@
 > browsers while playing, see [#50](https://github.com/chenxiao07/KytyPS5/issues/50)) and 8 GB of video memory (the test PC limited to 8 GB: most areas 40–60
 > fps, the heaviest 10–35).
 >
-> **Download: [the latest release](https://github.com/chenxiao07/KytyPS5/releases/latest)**, a Windows
-> x64 build made by GitHub Actions from this branch. Unzip it, double-click `launcher.cmd` (or
+> **Chen's Windows download: [the latest release](https://github.com/chenxiao07/KytyPS5/releases/latest)**, a Windows
+> x64 build from Chen's branch. The Linux AppImage for this fork is linked above. Unzip the Windows package, double-click `launcher.cmd` (or
 > `run.cmd`) and choose the game folder (the one with `eboot.bin`); the `README.md` inside explains
 > the rest. Use only a game dump made from your own copy of the game. To build it yourself, see
 > [Building with build-windows.cmd](#building-with-build-windowscmd-windows).
@@ -27,8 +38,8 @@
 >
 > 中文：本分支专为《恶魔之魂》(PS5 版 PPSA01341) 优化，支持游戏版本 1.07 (01.007.000) 和 1.05 (01.005.000)，两者性能补丁相同
 > （着色器缓存按版本分别预编译）；其他版本和游戏未测试。
-> 下载[最新 release](https://github.com/chenxiao07/KytyPS5/releases/latest)，解压后双击 `launcher.cmd`
-> 或 `run.cmd`，选择游戏目录（含 `eboot.bin` 的那一层）。推荐 32 GB 内存、12 GB 以上显存的显卡；16 GB 内存
+> Windows 版可下载 [Chen 的最新 release](https://github.com/chenxiao07/KytyPS5/releases/latest)，解压后双击 `launcher.cmd`
+> 或 `run.cmd`，选择游戏目录（含 `eboot.bin` 的那一层）。本分支的 Linux AppImage 下载链接见本文开头。推荐 32 GB 内存、12 GB 以上显存的显卡；16 GB 内存
 > （加载较慢；游戏时请关闭浏览器等大程序，见 [#50](https://github.com/chenxiao07/KytyPS5/issues/50)）和 8 GB 显存（测试机限制到 8 GB 时：多数区域 40–60 帧，最重的场景
 > 10–35 帧）也能运行。
 > **中文/日文：** 游戏文件里包含全部语言，但只列出所属发行区域的语言。把游戏目录 `sce_sys\param.json` 里的
@@ -225,7 +236,7 @@ The shortest way to a Release build of the emulator (without the Qt launcher):
 2. Clone and build from a new terminal (so that the tools are on `PATH`):
 
    ```powershell
-   git clone --recurse-submodules https://github.com/chenxiao07/KytyPS5.git
+   git clone --recurse-submodules https://github.com/JOmega321/KytyPS5.git
    cd KytyPS5
    .\build-windows.cmd
    ```
@@ -251,8 +262,10 @@ The build is optimized for the CPU it is built on (`-march=native`). For an exec
 PCs can run, set `KYTY_CMAKE_ARGS=-DKYTY_MARCH=x86-64-v3` before the first configure. The release
 package is built that way by [`.github/workflows/build.yml`](.github/workflows/build.yml) when
 **Actions > Build KytyPS5 (Windows) > Run workflow** is started or a `v*` tag is pushed, and published as a
-release (pushes build nothing). [`.github/workflows/build-linux.yml`](.github/workflows/build-linux.yml)
-builds the Linux package the same way (a `v*` tag adds it to that tag's release).
+release. [`.github/workflows/build-linux.yml`](.github/workflows/build-linux.yml)
+builds the Linux package the same way (a `v*` tag adds it to that tag's release). These tagged/manual release
+workflows do not run on branch pushes; this fork's separate
+[AppImage workflow](.github/workflows/chen-appimage.yml) runs on every push to `main` and on manual dispatch.
 
 AMD's FSR runtime (frame generation, 2x, any GPU without DLSS frame generation: `run-windows.ps1 -Fsr`, a launcher
 checkbox; and with `-Upscaler fsr` FSR 4 upscaling on the Radeon cards AMD lists for it) is built in when AMD FSR SDK
@@ -308,6 +321,16 @@ Dear ImGui linked in (nothing to install); it starts the game through `run_ds.sh
 manual steps below build the Qt launcher as well. `tools/local/dlss-bridge/build-dlss-linux.sh` adds DLSS
 (`tools/local/dlss-bridge/README.md`), and `./precompile-linux.sh --game <the game>` makes the static shader cache
 as `precompile-windows.ps1` does on Windows (`--help`).
+
+This fork also provides [native FSR4 upscaling](docs/FSR412-LINUX.md) and
+[native FSR4 frame generation](tools/fsr4fg-vk/README.md#in-the-emulator), configured separately in the launcher.
+The [Linux launcher guide](launcher-linux/README.md) covers the FSR4 Setup page, keyboard editor and optional
+in-game key-cap prompts. FSR4 features support explicit fallback to FSR3; selecting an option does not establish
+that the GPU is running it, so check the runtime status and log.
+
+The build also needs `lld` on `PATH`. If the checkout path contains spaces, use a space-free build directory for
+the current linker-map flag, for example `KYTY_BUILD_DIR=/tmp/kyty-build ./build-linux.sh`. Use the same
+`KYTY_BUILD_DIR` when building additional targets.
 
 Install the toolchain and the libraries the bundled SDL2 needs. Without the audio, Wayland and
 udev development packages SDL2 quietly configures itself without those backends, and the resulting

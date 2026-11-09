@@ -1,8 +1,13 @@
-# FSR 4 frame generation: offline recorder
+# Native Linux FSR4 frame generation and offline tools
 
-Records what AMD's FSR Frame Generation **4.0.2** provider asks a Vulkan device to do, so a native Linux replay
-(the way `tools/fsr412-vk` replays FSR 4.1.2 upscaling) can be built and checked against it. This is step 2 of the
-frame generation investigation; nothing here is used by the emulator yet.
+This fork integrates AMD's FSR Frame Generation **4.0.2** runtime into the Linux Vulkan emulator, with FSR3 as
+the fallback. The AppImage includes preparation tools and the startup self-test; see [In the emulator](#in-the-emulator)
+for launcher setup. [FSR4 upscaling](../../docs/FSR412-LINUX.md) is a separate feature with a different DLL.
+
+The offline recorder below records AMD's host decisions against a synthetic Vulkan device. Those recordings
+help check the native implementation; they do not execute GPU work or establish in-game quality.
+
+## Offline recorder
 
 - Input: `amd_fidelityfx_framegeneration_vk.dll` from AMD's FidelityFX SDK **v2.4.0**,
   SHA-256 `d002dabff8c5e71eaa715fc99438cd4dc81230262a7897b16bc402efec3498b4`. The SDK's `docs/license.md` lists
@@ -68,20 +73,25 @@ Measured with the renderer idle at 1440p: the CPU recording is about 0.9 ms, abo
 full build. The hand-off to AMD's thread is about 0.02 ms. AMD's barriers are already compute to compute: narrowing them
 changed nothing.
 
-`hud-anchor.h`'s interface shaders are 01.007.000's. On another version FSR finds no HUD canvas, gets no HUD-less image
-and interpolates the HUD: `KYTY_HUD_SHADER_LOG=1` lists the shaders drawing into canvas-sized targets, and
-`KYTY_HUD_CANVAS_SHADERS=<hex,hex>` adds some without a build.
+`hud-anchor.h` includes HUD-canvas detection for both 01.007.000 and 01.005.000. On another version the hashes may
+not match, leaving FSR without a HUD-less image: `KYTY_HUD_SHADER_LOG=1` lists the shaders drawing into canvas-sized
+targets, and `KYTY_HUD_CANVAS_SHADERS=<hex,hex>` adds canvas candidates without a build. The 01.005.000 canvas-only
+hashes do not enable the 01.007.000 vertex-layout patches.
+
+Generated frames are paced from submission by default. `KYTY_FG_PACE_GPU=1` selects GPU-completion pacing for
+comparison. Present-call timing alone does not establish the intervals between actual display flips.
 
 ## Limits
 
 The synthetic device answers every feature query positively (FP8 ones only with the FP8 profile), so this records
 the RDNA 4 path, not RADV's actual feature set. Group counts and constants are AMD's host decisions for these inputs;
-they say nothing about image quality, GPU support or speed. Of the DLL's 416 unique programs, 96 fail Vulkan 1.3
-validation as shipped and 38 still fail after `tools/fsr412-vk`'s FP8 preparation (reverse matrix casts in 2- and
-4-subgroup workgroups; 16-bit-float image types); a replay needs those two cases handled too. Replay correctness has to be checked against
+they say nothing about image quality, GPU support or speed. In the original investigation, 96 of the DLL's 416 unique
+programs failed Vulkan 1.3 validation as shipped, and upscaler-only FP8 preparation left 38 failures (reverse matrix
+casts in 2- and 4-subgroup workgroups; 16-bit-float image types). The frame-generation preparation described below
+handles these cases and the 64-bit sampled images. Passing validation still does not establish equivalence with
 AMD's own output on real hardware.
 
-## Step 3: AMD's runtime on the real GPU (test only)
+## Standalone GPU validation tool
 
 - `prepare_fg.py` (with `fg_legalize.py`) prepares all 416 programs from the user's own DLL: the FSR 4.1.2 upscaler's
   FP8 preparation plus reverse matrix casts in 2- and 4-subgroup workgroups (slices chosen by `SubgroupId`), 16-bit
@@ -115,6 +125,6 @@ whether all of this works on a machine without being at risk from the driver (`F
 
 Pipelines: 195 for 4.0.2 (4.5 s with an empty shader cache, 0.1 s cached), 18 for 3.1.6. Output is byte-identical
 between runs and with or without full subgroups. Also run: 1920x1080 (2.1 ms) and 3840x2160 (6.3 ms), at scored-frame
-timing, not sustained. Not run: `mlfi_8k`, Vulkan validation layers (not installed here), AMD's Windows output as a
-reference, and anything in a game. FSR 4's remaining error against FSR 3 is at object borders and uncovered areas; the
+timing, not sustained. These standalone tests did not cover `mlfi_8k`, Vulkan validation layers, AMD's Windows output
+as a reference, or gameplay quality/performance. FSR 4's remaining error against FSR 3 is at object borders and uncovered areas; the
 hard-edged rectangles here say little about either in real content.

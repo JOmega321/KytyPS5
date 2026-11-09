@@ -59,7 +59,8 @@ Your precompiled shaders stay valid: the shader translation is the same as in v2
 - **For testers, off by default** (credit @CarpetHead, @ponhei9502): `KYTY_PM4_REGFILE` (PR #285), `KYTY_UPLOAD_LANES`
   (PR #287), `KYTY_EAGER_FEEDBACK`, `KYTY_FEEDBACK_BATCH`, `KYTY_TABLE_SERIALS`, `KYTY_TABLE_MEMO` (PRs #300-#303) and
   `KYTY_LANE_LOCAL_WIDE` (PR #304). They made no difference to the frame rate on our PCs, or moved it both ways.
-- **Linux package README**: AMD's FSR SDK DLLs are Windows files, so FSR 4 is not available on Linux (#307).
+- **Chen's Linux package README**: Chen's packages do not provide FSR4 on Linux (#307). This fork retains native
+  Linux FSR4 upscaling and frame generation by preparing/hosting the supported DLLs; see the fork notes above.
 - **Thanks** to @CarpetHead and @ponhei9502 for their pull requests, and to @robbely, @ft1704, @FKF-GR and
   @blubberbozz-wq for their reports and tests.
 
@@ -129,7 +130,7 @@ Your precompiled shaders stay valid: the shader translation is the same as in v2
 - **供测试用，默认关闭**（感谢 @CarpetHead、@ponhei9502）：`KYTY_PM4_REGFILE`（PR #285）、`KYTY_UPLOAD_LANES`（PR #287）、
   `KYTY_EAGER_FEEDBACK`、`KYTY_FEEDBACK_BATCH`、`KYTY_TABLE_SERIALS`、`KYTY_TABLE_MEMO`（PR #300-#303）和
   `KYTY_LANE_LOCAL_WIDE`（PR #304）。它们在我们的电脑上对帧率没有影响，或者有升有降。
-- **Linux 包的 README**：AMD FSR SDK 的 DLL 是 Windows 文件，Linux 上没有 FSR 4（#307）。
+- **Chen 的 Linux 包 README**：Chen 发布的 Linux 包不提供 FSR 4（#307）；本分支保留原生 Linux FSR 4 超分和插帧，见本文开头。
 - **感谢** @CarpetHead 和 @ponhei9502 的 PR，以及 @robbely、@ft1704、@FKF-GR 和 @blubberbozz-wq 的反馈与测试。
 
 ## v20261105 的变化
