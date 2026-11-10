@@ -1,6 +1,6 @@
 # chenxiao07 Linux AppImage
 
-Chen's updates through `cd24292622e03a487c205ef752848800f12830bb` were integrated in `c7a98d4b` on 2026-11-07.
+The fork includes Chen's `v20261110` updates through `3ec8cf56`.
 The `main` branch (formerly `chen-kytyps5-fsr4-upscaler`) retains native FSR 4.1.2 INT8/FP8 upscaling,
 experimental native FSR4 frame generation and Linux APR file retention/bounded asset prefetch.
 See the [integration notes](../../docs/RELEASE-NOTES.md) for the included changes.
