@@ -125,6 +125,7 @@ int Run(const std::vector<std::string>& argv, std::string* output, int timeout_m
 		}
 		close(pipe_fds[0]);
 	}
+	if (timed_out) kill(pid, SIGKILL);
 	int status = 0;
 	for (;;) {
 		const pid_t done = waitpid(pid, &status, timed_out ? 0 : WNOHANG);

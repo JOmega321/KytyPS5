@@ -59,8 +59,7 @@ Prerequisites include Git, Clang/Clang++, `lld`, CMake, Ninja, `glslangValidator
 dependencies listed in README.md. The wrapper initializes missing submodules; CMake fetches additional pinned
 dependencies. Source archives without `.git` are not supported by the wrapper.
 
-The checkout path currently contains spaces. Use a space-free build directory to work around the current
-linker-map flag:
+Source and build directories may contain spaces. To select a separate build directory:
 
 ```sh
 KYTY_BUILD_DIR=/tmp/kyty-build ./build-linux.sh

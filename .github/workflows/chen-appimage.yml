@@ -68,6 +68,8 @@ jobs:
             -DKYTY_PGO_USE="$PWD/tools/pgo/kyty-linux.profdata" \
             -DKYTY_BUILD_ORIGIN=Fork -DKYTY_BUILD_REPOSITORY="$GITHUB_REPOSITORY"
           cmake --build _Build/appimage --target kyty_emulator kyty_launcher kyty_shader_precompile fsr4fg-gpu --parallel 4
+          cmake --build _Build/appimage --target kyty_launcher_platform_tests kyty_launcher_settings_tests --parallel 4
+          ctest --test-dir _Build/appimage -R '^launcher_(platform|settings)$' --output-on-failure
           _Build/appimage/kyty_emulator --help > _Build/native-help.log
           _Build/appimage/kyty_launcher --help >> _Build/native-help.log
       - uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5

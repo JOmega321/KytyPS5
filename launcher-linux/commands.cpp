@@ -432,11 +432,13 @@ Launch Commands::Precompile(const std::string& mode) const {
 	launch.directory = context_.root;
 	launch.pause     = Launch::Pause::Always;
 	launch.argv      = {context_.precompile_script.string()};
-    if (!S().Str("shader_cache_dir").empty())
-        launch.set.emplace_back("KYTY_PIPELINE_CACHE_DIR", fs::absolute(context_.root / S().Str("shader_cache_dir")).lexically_normal().string());
-    else launch.unset.emplace_back("KYTY_PIPELINE_CACHE_DIR");
-    if (const int jobs = S().Int("precompile_jobs"); jobs >= 1 && jobs <= 16)
-        launch.argv.insert(launch.argv.end(), {"--jobs", std::to_string(jobs)});
+	if (!S().Str("shader_cache_dir").empty())
+		launch.set.emplace_back("KYTY_PIPELINE_CACHE_DIR",
+		                        fs::absolute(context_.root / S().Str("shader_cache_dir")).lexically_normal().string());
+	else
+		launch.unset.emplace_back("KYTY_PIPELINE_CACHE_DIR");
+	if (const int jobs = S().Int("precompile_jobs"); jobs >= 1 && jobs <= 16)
+		launch.argv.insert(launch.argv.end(), {"--jobs", std::to_string(jobs)});
 	if (!S().Str("game").empty())
 		launch.argv.insert(launch.argv.end(), {"--game", S().Str("game")});
 	if (!mode.empty())

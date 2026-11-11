@@ -343,8 +343,8 @@ The [Linux launcher guide](launcher-linux/README.md) covers the FSR4 Setup page,
 in-game key-cap prompts. FSR4 features support explicit fallback to FSR3; selecting an option does not establish
 that the GPU is running it, so check the runtime status and log.
 
-The build also needs `lld` on `PATH`. If the checkout path contains spaces, use a space-free build directory for
-the current linker-map flag, for example `KYTY_BUILD_DIR=/tmp/kyty-build ./build-linux.sh`. Use the same
+The build also needs `lld` on `PATH`. Source and build directories may contain spaces. To select a separate
+build directory, run `KYTY_BUILD_DIR=/tmp/kyty-build ./build-linux.sh`. Use the same
 `KYTY_BUILD_DIR` when building additional targets.
 
 Install the toolchain and the libraries the bundled SDL2 needs. Without the audio, Wayland and

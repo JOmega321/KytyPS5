@@ -168,6 +168,7 @@ bool Settings::Save() {
 		std::ofstream file(temporary, std::ios::binary | std::ios::trunc);
 		if (!file) return false; // a read-only folder: the choices last until the window closes
 		file << text << "\n";
+		file.close();
 		if (!file) return false;
 	}
 	std::filesystem::rename(temporary, path_, error);

@@ -49,6 +49,27 @@ target_link_options(kyty_launcher PRIVATE $<$<CONFIG:Release>:-s>)
 # The keyboard prompts' tests (tests/KeyboardPromptsLinuxTests.cpp): no game files, SDL or ImGui needed.
 #   cmake --build <build> --target kyty_launcher_prompts_tests && ctest -R launcher_keyboard_prompts
 if(BUILD_TESTING)
+	add_executable(kyty_launcher_platform_tests EXCLUDE_FROM_ALL
+		"${KYTY_TESTS_DIR}/LauncherPlatformTests.cpp"
+		platform.cpp
+		settings.cpp
+	)
+	target_include_directories(kyty_launcher_platform_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+	target_compile_options(kyty_launcher_platform_tests PRIVATE -fexceptions)
+	target_link_libraries(kyty_launcher_platform_tests PRIVATE nlohmann_json::nlohmann_json Vulkan::Headers ${CMAKE_DL_LIBS})
+	add_test(NAME launcher_platform COMMAND $<TARGET_FILE:kyty_launcher_platform_tests>)
+	set_tests_properties(launcher_platform PROPERTIES TIMEOUT 15)
+
+	add_executable(kyty_launcher_settings_tests EXCLUDE_FROM_ALL
+		"${KYTY_TESTS_DIR}/LauncherSettingsTests.cpp"
+		settings.cpp
+	)
+	target_include_directories(kyty_launcher_settings_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+	target_compile_options(kyty_launcher_settings_tests PRIVATE -fexceptions)
+	target_link_libraries(kyty_launcher_settings_tests PRIVATE nlohmann_json::nlohmann_json)
+	add_test(NAME launcher_settings COMMAND $<TARGET_FILE:kyty_launcher_settings_tests>)
+	add_dependencies(kyty_tests kyty_launcher_platform_tests kyty_launcher_settings_tests)
+
 	add_executable(kyty_launcher_prompts_tests EXCLUDE_FROM_ALL
 		"${KYTY_TESTS_DIR}/KeyboardPromptsLinuxTests.cpp"
 		bytes.cpp
